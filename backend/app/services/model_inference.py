@@ -1,0 +1,358 @@
+"""Model inference service with two interchangeable engines.
+
+* **CNN + Grad-CAM engine** — used when a trained model file exists at
+  ``settings.model_path`` (a state dict for the architecture named by
+  ``settings.model_architecture``). PyTorch / TorchVision are imported lazily
+  so the application can boot and run its test-suite without them installed.
+
+* **Baseline heuristic engine** — a deterministic image-statistics classifier
+  with a saliency heatmap, used when no trained model is present. It is
+  *not* a clinical-grade detector; it exists so the full
+  upload → predict → heatmap loop is functional out of the box and can be
+  swapped for a trained model without any code changes.
+
+Both engines expose the same API
+(``ModelService.predict_with_gradcam(preprocessed: np.ndarray)``) so the
+routes are engine-agnostic. Swap strategy is also trivial: point
+``EXTERNAL_INFERENCE_URL`` at a cloud GPU endpoint later without touching
+callers.
+"""
+
+import logging
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+from PIL import Image, ImageFilter
+
+from app.core.config import get_settings
+from app.core.logging import get_logger
+
+settings = get_settings()
+logger = get_logger(__name__)
+
+HEURISTIC_ENGINE = "baseline-heuristic"
+
+# ImageNet normalization used by preprocess_image()
+_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+
+
+def _import_torch():
+    """Import torch (and verify torchvision is importable) on demand."""
+    import torch
+    import torchvision  # noqa: F401
+    return torch
+
+
+class GradCAM:
+    """Grad-CAM using forward/backward hooks on a named target layer."""
+
+    def __init__(self, model, target_layer: str):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
+        self._register_hooks()
+
+    def _register_hooks(self):
+        def forward_hook(module, input, output):
+            self.activations = output.detach()
+
+        def backward_hook(module, grad_input, grad_output):
+            self.gradients = grad_output[0].detach()
+
+        target_module = dict(self.model.named_modules()).get(self.target_layer)
+        if target_module is None:
+            raise ValueError(f"Target layer '{self.target_layer}' not found in model")
+
+        target_module.register_forward_hook(forward_hook)
+        target_module.register_full_backward_hook(backward_hook)
+
+    def generate(self, input_tensor: Any, class_idx: Optional[int] = None) -> np.ndarray:
+        import torch
+        import torch.nn.functional as F
+
+        self.model.eval()
+        output = self.model(input_tensor)
+
+        if class_idx is None:
+            class_idx = output.argmax(dim=1).item()
+
+        self.model.zero_grad()
+        target = output[0, class_idx]
+        target.backward(retain_graph=True)
+
+        gradients = self.gradients[0].cpu().numpy()
+        activations = self.activations[0].cpu().numpy()
+
+        weights = np.mean(gradients, axis=(1, 2))
+
+        cam = np.zeros(activations.shape[1:], dtype=np.float32)
+        for i, w in enumerate(weights):
+            cam += w * activations[i]
+
+        cam = np.maximum(cam, 0)
+
+        # Resize to the model input size with PIL (no OpenCV dependency).
+        size = settings.model_input_size
+        cam_img = Image.fromarray(cam).resize((size, size), Image.Resampling.BILINEAR)
+        cam = np.array(cam_img, dtype=np.float32)
+
+        cam = cam - cam.min()
+        if cam.max() > 0:
+            cam = cam / cam.max()
+
+        return cam
+
+
+def build_model(architecture: str, num_classes: int):
+    """Build a classification head on a known TorchVision backbone."""
+    import torch
+    import torch.nn as nn
+    import torchvision.models as tv
+
+    if architecture == "resnet50":
+        model = tv.resnet50(weights=None)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        target_layer = "layer4"
+    elif architecture == "resnet18":
+        model = tv.resnet18(weights=None)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        target_layer = "layer4"
+    elif architecture == "efficientnet_b0":
+        model = tv.efficientnet_b0(weights=None)
+        model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
+        target_layer = "features.8"
+    elif architecture == "densenet121":
+        model = tv.densenet121(weights=None)
+        model.classifier = nn.Linear(model.classifier.in_features, num_classes)
+        target_layer = "features.denseblock4"
+    else:
+        raise ValueError(f"Unsupported architecture: {architecture}")
+
+    return model, target_layer
+
+
+class ModelService:
+    _instance = None
+    _model = None
+    _gradcam = None
+    _device = "cpu"
+    _engine = HEURISTIC_ENGINE
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if not getattr(self, "_initialized", False):
+            self._initialize()
+
+    # ------------------------------------------------------------------ init
+    def _initialize(self) -> None:
+        self._initialized = True
+        self._model = None
+        self._gradcam = None
+        self._device = "cpu"
+        self._engine = HEURISTIC_ENGINE
+
+        model_path = Path(settings.model_path)
+        if model_path.exists():
+            try:
+                self._load_cnn(model_path)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error(
+                    "Failed to load CNN model (%s); falling back to %s engine",
+                    exc,
+                    HEURISTIC_ENGINE,
+                )
+                self._model = None
+                self._gradcam = None
+                self._device = "cpu"
+                self._engine = HEURISTIC_ENGINE
+
+        if self._model is None:
+            logger.warning(
+                "No trained model found at '%s' — using '%s' engine. "
+                "Drop a state-dict at that path to enable CNN + Grad-CAM.",
+                settings.model_path,
+                HEURISTIC_ENGINE,
+            )
+
+    def _load_cnn(self, model_path: Path) -> None:
+        import torch
+
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model, target_layer = build_model(
+            settings.model_architecture, settings.model_num_classes
+        )
+
+        state_dict = torch.load(str(model_path), map_location=self._device)
+        model.load_state_dict(state_dict)
+
+        model.to(self._device)
+        model.eval()
+
+        self._model = model
+        self._gradcam = GradCAM(model, target_layer)
+        self._engine = settings.model_architecture
+        logger.info("CNN engine ready (architecture=%s, device=%s)", self._engine, self._device)
+
+    # ------------------------------------------------------------- public
+    @property
+    def engine(self) -> str:
+        return self._engine
+
+    @property
+    def is_model_loaded(self) -> bool:
+        return self._model is not None
+
+    @property
+    def device(self) -> str:
+        return str(self._device)
+
+    def predict_with_gradcam(self, input_np: np.ndarray) -> Dict[str, Any]:
+        """Run inference + explainability heatmap on a preprocessed batch.
+
+        ``input_np`` has shape ``(1, 3, H, W)``, float32, ImageNet-normalized.
+        """
+        if self._model is not None:
+            return self._predict_cnn(input_np)
+        return self._predict_heuristic(input_np)
+
+    # ------------------------------------------------------- CNN path
+    def _predict_cnn(self, input_np: np.ndarray) -> Dict[str, Any]:
+        import torch
+        import torch.nn.functional as F
+
+        start = time.time()
+        tensor = torch.from_numpy(input_np).float().to(self._device)
+
+        with torch.no_grad():
+            output = self._model(tensor)
+            probs = F.softmax(output, dim=1)[0].cpu().numpy()
+
+        predicted_class = int(np.argmax(probs))
+        confidence = float(probs[predicted_class])
+        cam = self._generate_gradcam_cnn(input_np, predicted_class)
+        elapsed_ms = (time.time() - start) * 1000
+
+        return self._pack(predicted_class, confidence, probs, cam, elapsed_ms)
+
+    def _generate_gradcam_cnn(self, input_np: np.ndarray, class_idx: int) -> np.ndarray:
+        import torch
+
+        tensor = torch.from_numpy(input_np).float().to(self._device)
+        tensor.requires_grad_(True)
+        return self._gradcam.generate(tensor, class_idx)
+
+    # -------------------------------------------------- heuristic path
+    def _predict_heuristic(self, input_np: np.ndarray) -> Dict[str, Any]:
+        """Deterministic, explainable baseline classifier.
+
+        Features (all computed from the luminance channel of the scan):
+          * mean opacity        — brighter scans (overall hazy/opaque lungs)
+          * contrast            — dynamic range of the image
+          * edge density        — texture content (reticular/patchy patterns)
+          * left/right asymmetry— focal opacities usually are unilateral
+          * spatial patchiness  — whether opacity is concentrated or diffuse
+
+        A logistic model over these features yields a stable probability. The
+        saliency map highlights high-contrast, bright regions — a reasonable
+        stand-in for a lesion-localization heatmap.
+        """
+        start = time.time()
+
+        rgb = np.clip(input_np[0] * _STD + _MEAN, 0.0, 1.0)  # (3, H, W)
+        gray = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]).astype(np.float32)
+
+        gray_u8 = (gray * 255).astype(np.uint8)
+        pil_gray = Image.fromarray(gray_u8, mode="L")
+
+        # Edge map (texture) -> blurred saliency proxy.
+        edges = np.asarray(pil_gray.filter(ImageFilter.FIND_EDGES), dtype=np.float32) / 255.0
+        blurred = np.asarray(
+            pil_gray.filter(ImageFilter.GaussianBlur(radius=9)), dtype=np.float32
+        ) / 255.0
+
+        saliency = np.clip(edges * (0.4 + blurred), 0.0, 1.0)
+        if saliency.max() > 0:
+            saliency = saliency / saliency.max()
+
+        h, w = gray.shape
+        half = w // 2
+        left = gray[:, :half]
+        right = gray[:, half:]
+        asymmetry = float(abs(float(left.mean()) - float(right.mean())))
+
+        # Patchiness: std of mean intensity across a coarse grid.
+        block = 32
+        patch_means = [
+            gray[y : y + block, x : x + block].mean()
+            for y in range(0, h - block + 1, block)
+            for x in range(0, w - block + 1, block)
+        ]
+        patch_std = float(np.std(patch_means)) if patch_means else 0.0
+
+        mean_opacity = float(gray.mean())
+        contrast = float(gray.std())
+        edge_density = float(edges.mean())
+
+        score = (
+            (mean_opacity - 0.45) * 3.0
+            + (contrast - 0.20) * 2.5
+            + (edge_density - 0.10) * 4.0
+            + asymmetry * 2.0
+            + (patch_std - 0.06) * 3.0
+        )
+
+        p_abnormal = 1.0 / (1.0 + float(np.exp(-score)))
+        p_abnormal = float(np.clip(p_abnormal, 0.01, 0.99))
+        p_normal = 1.0 - p_abnormal
+
+        classes = settings.model_classes or ["Normal", "Pneumonia"]
+        if classes[1:]:
+            probs = [p_normal, p_abnormal][: len(classes)]
+            predicted_class = int(np.argmax(probs))
+        else:
+            probs = [p_abnormal]
+            predicted_class = 0
+
+        confidence = float(probs[predicted_class])
+        elapsed_ms = (time.time() - start) * 1000
+
+        return self._pack(predicted_class, confidence, np.array(probs), saliency, elapsed_ms)
+
+    # ----------------------------------------------------------- helpers
+    def _pack(
+        self,
+        predicted_class: int,
+        confidence: float,
+        probs: np.ndarray,
+        cam: np.ndarray,
+        elapsed_ms: float,
+    ) -> Dict[str, Any]:
+        classes = settings.model_classes
+        return {
+            "predicted_class": predicted_class,
+            "confidence": confidence,
+            "probabilities": [float(p) for p in probs],
+            "gradcam": cam,
+            "processing_time_ms": elapsed_ms,
+            "engine": self._engine,
+            "class_name": (
+                classes[predicted_class]
+                if 0 <= predicted_class < len(classes)
+                else f"Class_{predicted_class}"
+            ),
+        }
+
+
+model_service = ModelService()
+
+
+def get_model_service() -> ModelService:
+    return model_service

@@ -1,0 +1,142 @@
+import logging
+import json
+import sys
+from datetime import datetime
+from typing import Dict, Any, Optional
+from pythonjsonlogger import jsonlogger
+from app.core.config import get_settings
+
+settings = get_settings()
+
+
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record: Dict[str, Any], record: logging.LogRecord, message_dict: Dict[str, Any]) -> None:
+        super().add_fields(log_record, record, message_dict)
+        log_record["timestamp"] = datetime.utcnow().isoformat()
+        log_record["level"] = record.levelname
+        log_record["logger"] = record.name
+        log_record["service"] = settings.app_name
+
+
+def setup_logging() -> None:
+    log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    
+    handler = logging.StreamHandler(sys.stdout)
+    
+    if settings.log_format == "json":
+        formatter = CustomJsonFormatter(
+            "%(timestamp)s %(level)s %(logger)s %(message)s"
+        )
+    else:
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+    
+    handler.setFormatter(formatter)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.handlers = [handler]
+    
+    logging.getLogger("uvicorn").setLevel(log_level)
+    logging.getLogger("uvicorn.access").setLevel(log_level)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+
+def get_logger(name: str) -> logging.Logger:
+    return logging.getLogger(name)
+
+
+class AuditLogger:
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+    
+    def log_prediction(
+        self,
+        user_id: str,
+        user_role: str,
+        file_hash: str,
+        prediction: str,
+        confidence: float,
+        processing_time_ms: float,
+        model_version: str,
+        anonymized_patient_id: Optional[str] = None
+    ) -> None:
+        self.logger.info(
+            "prediction_made",
+            extra={
+                "event_type": "prediction",
+                "user_id": user_id,
+                "user_role": user_role,
+                "file_hash": file_hash,
+                "prediction": prediction,
+                "confidence": confidence,
+                "processing_time_ms": processing_time_ms,
+                "model_version": model_version,
+                "anonymized_patient_id": anonymized_patient_id,
+            }
+        )
+    
+    def log_upload(
+        self,
+        user_id: str,
+        user_role: str,
+        file_hash: str,
+        filename: str,
+        file_size: int,
+        mime_type: str
+    ) -> None:
+        self.logger.info(
+            "file_uploaded",
+            extra={
+                "event_type": "upload",
+                "user_id": user_id,
+                "user_role": user_role,
+                "file_hash": file_hash,
+                "filename": filename,
+                "file_size": file_size,
+                "mime_type": mime_type,
+            }
+        )
+    
+    def log_auth(
+        self,
+        event_type: str,
+        user_id: Optional[str] = None,
+        username: Optional[str] = None,
+        success: bool = True,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> None:
+        self.logger.info(
+            f"auth_{event_type}",
+            extra={
+                "event_type": f"auth_{event_type}",
+                "user_id": user_id,
+                "username": username,
+                "success": success,
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+            }
+        )
+    
+    def log_error(
+        self,
+        user_id: Optional[str],
+        error_type: str,
+        error_message: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> None:
+        self.logger.error(
+            "application_error",
+            extra={
+                "event_type": "error",
+                "user_id": user_id,
+                "error_type": error_type,
+                "error_message": error_message,
+                "context": context or {},
+            }
+        )
+
+
+audit_logger = AuditLogger(get_logger("audit"))

@@ -1,0 +1,92 @@
+# MediScan AI — full stack deployment
+#
+#   docker compose up --build
+#
+# Services:
+#   db       PostgreSQL 16 (encrypted at rest via disk encryption / cloud)
+#   backend  FastAPI inference service (AES-256 at-rest, JWT + RBAC)
+#   frontend React SPA served by nginx, proxying /api to the backend
+#
+# Secrets are read from a root .env file if present (see .env.example), with
+# sane development defaults so the stack runs out of the box.
+#
+# TLS: terminate HTTPS at a reverse proxy / load balancer in front of this
+# stack (e.g. nginx, Caddy, ALB) — never expose the backend port directly.
+
+name: mediscan
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mediscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mediscan}
+      POSTGRES_DB: ${POSTGRES_DB:-mediscan}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mediscan} -d ${POSTGRES_DB:-mediscan}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [mediscan]
+    # No host port: the database is only reachable inside the stack.
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Dev convenience: reach /docs directly on the host. Remove this port
+    # mapping in production and reach the API only through the nginx proxy.
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      APP_NAME: MediScan AI
+      DEBUG: "false"
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mediscan}:${POSTGRES_PASSWORD:-mediscan}@db:5432/${POSTGRES_DB:-mediscan}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-32-chars-minimum-!!!!!!!!}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-chars-minimum-!!!!!!!!}
+      ENCRYPTION_SALT: ${ENCRYPTION_SALT:-change-me-16-chars!}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      MODEL_PATH: /app/models/model.pth
+      MODEL_ARCHITECTURE: ${MODEL_ARCHITECTURE:-resnet50}
+      MODEL_NUM_CLASSES: ${MODEL_NUM_CLASSES:-2}
+      MODEL_INPUT_SIZE: ${MODEL_INPUT_SIZE:-224}
+      MODEL_CLASSES: ${MODEL_CLASSES:-["Normal","Pneumonia"]}
+      UPLOAD_DIR: /app/uploads
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AUDIT_LOG_PATH: /app/logs/audit.log
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
+      LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
+      HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+      # Drop a trained model.pth into ./backend/models to enable CNN + Grad-CAM
+      - ./backend/models:/app/models:ro
+    networks: [mediscan]
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks: [mediscan]
+
+volumes:
+  pgdata:
+  uploads:
+  logs:
+
+networks:
+  mediscan:
