@@ -39,6 +39,15 @@ async def override_get_db():
         yield session
 
 
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limiter():
+    """The login rate limiter is a process-global in-memory store; clear it
+    between tests so failed-login tests never trip a 429 and flake."""
+    from app.api.routes.auth import _LOGIN_FAILURES
+    _LOGIN_FAILURES.clear()
+    yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 async def setup_db():
     async with engine.begin() as conn:

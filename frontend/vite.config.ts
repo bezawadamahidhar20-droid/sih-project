@@ -16,4 +16,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    port: 5173,
+    proxy: {
+      // Dev convenience: /api requests go straight to the local FastAPI
+      // backend (same origin from the browser's perspective, so no CORS).
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
+  },
 });

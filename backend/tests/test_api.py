@@ -55,6 +55,58 @@ class TestAuth:
         data = response.json()
         assert "access_token" in data
 
+    async def test_staff_cannot_self_promote(self, client: AsyncClient, staff_headers):
+        # Privilege-escalation regression: role/is_active are not part of the
+        # self-update schema and are rejected outright.
+        response = await client.patch(
+            "/api/v1/auth/me",
+            json={"role": "doctor"},
+            headers=staff_headers,
+        )
+        assert response.status_code == 422
+
+        me = await client.get("/api/v1/auth/me", headers=staff_headers)
+        assert me.status_code == 200
+        assert me.json()["role"] == "staff"
+
+    async def test_staff_can_update_own_profile_fields(self, client: AsyncClient, staff_headers):
+        response = await client.patch(
+            "/api/v1/auth/me",
+            json={"full_name": "Maya Updated", "email": "maya2@mediscan.com"},
+            headers=staff_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["full_name"] == "Maya Updated"
+        assert response.json()["role"] == "staff"
+
+    async def test_change_password_verifies_current(self, client: AsyncClient, auth_headers):
+        bad = await client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "wrongpass", "new_password": "newpass123"},
+            headers=auth_headers,
+        )
+        assert bad.status_code == 400
+
+        good = await client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "testpass123", "new_password": "newpass123"},
+            headers=auth_headers,
+        )
+        assert good.status_code == 204
+
+        # Old password no longer works; the new one does.
+        old = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        assert old.status_code == 401
+
+        new = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "newpass123"},
+        )
+        assert new.status_code == 200
+
 
 class TestScans:
     async def test_upload_scan_unauthorized(self, client: AsyncClient):

@@ -10,6 +10,12 @@
 # Secrets are read from a root .env file if present (see .env.example), with
 # sane development defaults so the stack runs out of the box.
 #
+# ⚠️  DEMO ACCOUNTS: SEED_DEMO_USERS defaults to TRUE and seeds well-known
+#     credentials (doctor / radiologist / staff, password DemoPass123!, also
+#     printed in the README). This is intentional for the SIH demo, but before
+#     ANY public deployment set SEED_DEMO_USERS=false AND replace the default
+#     JWT_SECRET_KEY / ENCRYPTION_KEY / ENCRYPTION_SALT values.
+#
 # TLS: terminate HTTPS at a reverse proxy / load balancer in front of this
 # stack (e.g. nginx, Caddy, ALB) — never expose the backend port directly.
 

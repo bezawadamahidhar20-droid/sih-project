@@ -44,6 +44,12 @@ async def seed_demo_users() -> None:
     if not (settings.seed_demo_users or settings.environment != "production"):
         return
 
+    if settings.environment == "production":
+        logger.warning(
+            "Seeding demo accounts with well-known credentials in a 'production' "
+            "environment. Disable with SEED_DEMO_USERS=false for any public deployment."
+        )
+
     async with async_session_maker() as session:
         total = await session.scalar(select(func.count()).select_from(User))
         if total and total > 0:

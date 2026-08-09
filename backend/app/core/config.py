@@ -1,6 +1,6 @@
 from functools import lru_cache
 from typing import List, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
@@ -46,7 +46,9 @@ class Settings(BaseSettings):
     log_format: str = "json"
     audit_log_path: str = "/app/logs/audit.log"
 
-    cors_origins: List[str] = ["http://localhost:3000"]
+    # Vite dev server (5173) proxies /api to the backend, but direct-origin
+    # access (VITE_API_URL override) must also be allowed.
+    cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     external_inference_url: Optional[str] = None
     external_inference_api_key: Optional[str] = None
@@ -57,10 +59,11 @@ class Settings(BaseSettings):
 
     seed_demo_users: bool = False
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
 
 @lru_cache

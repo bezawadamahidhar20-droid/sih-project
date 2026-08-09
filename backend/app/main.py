@@ -62,11 +62,13 @@ async def log_requests(request: Request, call_next):
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
     
+    # Log the path only — query strings may carry patient identifiers
+    # (e.g. ?patient_id=...), which must never land in access logs.
     logger.info(
         "request_completed",
         extra={
             "method": request.method,
-            "url": str(request.url),
+            "path": request.url.path,
             "status_code": response.status_code,
             "process_time_ms": process_time,
         }

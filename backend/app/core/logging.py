@@ -1,10 +1,12 @@
 import logging
 import json
+import os
 import sys
-from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Dict, Any, Optional
 from pythonjsonlogger import jsonlogger
 from app.core.config import get_settings
+from app.core.timeutil import utcnow_aware
 
 settings = get_settings()
 
@@ -12,7 +14,7 @@ settings = get_settings()
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record: Dict[str, Any], record: logging.LogRecord, message_dict: Dict[str, Any]) -> None:
         super().add_fields(log_record, record, message_dict)
-        log_record["timestamp"] = datetime.utcnow().isoformat()
+        log_record["timestamp"] = utcnow_aware().isoformat()
         log_record["level"] = record.levelname
         log_record["logger"] = record.name
         log_record["service"] = settings.app_name
@@ -41,6 +43,29 @@ def setup_logging() -> None:
     logging.getLogger("uvicorn").setLevel(log_level)
     logging.getLogger("uvicorn.access").setLevel(log_level)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+    # The dedicated "audit" logger also persists structured events to
+    # AUDIT_LOG_PATH (rotating file) in addition to stdout. Never contains PHI.
+    if settings.audit_log_path:
+        try:
+            os.makedirs(os.path.dirname(settings.audit_log_path), exist_ok=True)
+            audit_handler = RotatingFileHandler(
+                settings.audit_log_path,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            audit_handler.setFormatter(formatter)
+            audit_logger = logging.getLogger("audit")
+            audit_logger.setLevel(log_level)
+            audit_logger.handlers = [audit_handler]
+            # Keep propagation so audit events also reach the root stdout
+            # handler (container logs), while the file handler owns the file.
+            audit_logger.propagate = True
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "Could not open audit log file %s: %s", settings.audit_log_path, exc
+            )
 
 
 def get_logger(name: str) -> logging.Logger:

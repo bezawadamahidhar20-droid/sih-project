@@ -19,6 +19,7 @@ callers.
 """
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -141,6 +142,7 @@ class ModelService:
     _gradcam = None
     _device = "cpu"
     _engine = HEURISTIC_ENGINE
+    _inference_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -218,10 +220,16 @@ class ModelService:
         """Run inference + explainability heatmap on a preprocessed batch.
 
         ``input_np`` has shape ``(1, 3, H, W)``, float32, ImageNet-normalized.
+
+        Inference runs in worker threads (see ``run_in_threadpool``), but the
+        GradCAM hooks write shared instance attributes (``activations`` /
+        ``gradients``), so concurrent calls must be serialized — otherwise two
+        overlapping predictions would silently corrupt each other's heatmaps.
         """
-        if self._model is not None:
-            return self._predict_cnn(input_np)
-        return self._predict_heuristic(input_np)
+        with self._inference_lock:
+            if self._model is not None:
+                return self._predict_cnn(input_np)
+            return self._predict_heuristic(input_np)
 
     # ------------------------------------------------------- CNN path
     def _predict_cnn(self, input_np: np.ndarray) -> Dict[str, Any]:
@@ -310,7 +318,11 @@ class ModelService:
         )
 
         p_abnormal = 1.0 / (1.0 + float(np.exp(-score)))
-        p_abnormal = float(np.clip(p_abnormal, 0.01, 0.99))
+        # The heuristic is NOT a clinical-grade detector: cap the abnormal
+        # probability so a blank or hazy image can never produce a confident
+        # "abnormal / urgent review" banner (the high-risk threshold defaults
+        # to 0.9, unreachable from this engine).
+        p_abnormal = float(np.clip(p_abnormal, 0.01, 0.80))
         p_normal = 1.0 - p_abnormal
 
         classes = settings.model_classes or ["Normal", "Pneumonia"]

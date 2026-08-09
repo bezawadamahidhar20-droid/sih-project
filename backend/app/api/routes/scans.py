@@ -81,7 +81,7 @@ async def upload_scan(
         f.write(content)
     
     try:
-        image, dicom_metadata = load_image(temp_path)
+        image, dicom_metadata, persist_path = load_image(temp_path)
     except Exception as e:
         os.remove(temp_path)
         logger.error(f"Failed to load image: {e}")
@@ -89,11 +89,19 @@ async def upload_scan(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or corrupted image file"
         )
-    
+
+    # For DICOM uploads ``persist_path`` is a freshly-written anonymized copy
+    # (no PHI); for JPEG/PNG it is the original temp file. Only that file is
+    # ever encrypted and stored at rest.
     encrypted_filename = f"{file_hash}.enc"
     encrypted_path = os.path.join(settings.upload_dir, encrypted_filename)
-    encrypt_file(temp_path, encrypted_path)
-    os.remove(temp_path)
+    encrypt_file(persist_path, encrypted_path)
+
+    # Clean up temp artifacts.
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    if persist_path != temp_path and os.path.exists(persist_path):
+        os.remove(persist_path)
     
     scan = Scan(
         file_hash=file_hash,

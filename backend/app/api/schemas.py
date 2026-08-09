@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 from enum import Enum
 
 
@@ -22,10 +22,32 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
+    """Admin user update (doctor/radiologist acting on another user)."""
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class UserSelfUpdate(BaseModel):
+    """Fields a user may change on their OWN account.
+
+    Deliberately excludes ``role`` / ``is_active`` — those are privileged
+    and only changeable by doctor/radiologist via ``PATCH /auth/users/{id}``.
+    Unknown fields are rejected outright so a stray ``role`` in a request body
+    fails loudly instead of being silently applied.
+    """
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
 
 
 class UserResponse(UserBase):
@@ -38,8 +60,7 @@ class UserResponse(UserBase):
     created_at: datetime
     last_login: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Token(BaseModel):
@@ -86,8 +107,7 @@ class ScanResponse(BaseModel):
     created_at: datetime
     processed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 
@@ -111,8 +131,7 @@ class PredictionResponse(BaseModel):
     scan: Optional["ScanResponse"] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FlagPredictionRequest(BaseModel):

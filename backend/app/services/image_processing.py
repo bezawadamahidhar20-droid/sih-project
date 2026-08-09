@@ -1,6 +1,5 @@
 import pydicom
 from pydicom.dataset import Dataset
-from pydicom.dataelem import DataElement
 import numpy as np
 from PIL import Image
 import io
@@ -14,34 +13,12 @@ from app.core.logging import get_logger
 settings = get_settings()
 logger = get_logger(__name__)
 
-PHI_TAGS = [
-    (0x0010, 0x0010),  # Patient Name
-    (0x0010, 0x0020),  # Patient ID
-    (0x0010, 0x0030),  # Patient Birth Date
-    (0x0010, 0x0040),  # Patient Sex
-    (0x0010, 0x1000),  # Other Patient IDs
-    (0x0010, 0x1001),  # Other Patient Names
-    (0x0010, 0x2160),  # Ethnic Group
-    (0x0010, 0x4000),  # Patient Comments
-    (0x0008, 0x0050),  # Accession Number
-    (0x0008, 0x0080),  # Institution Name
-    (0x0008, 0x0090),  # Referring Physician Name
-    (0x0008, 0x1040),  # Institutional Department Name
-    (0x0008, 0x1050),  # Performing Physician Name
-    (0x0008, 0x1060),  # Name of Physician Reading Study
-    (0x0008, 0x1070),  # Operators Name
-    (0x0010, 0x0021),  # Issuer of Patient ID
-    (0x0010, 0x1010),  # Patient Age
-    (0x0010, 0x1020),  # Patient Size
-    (0x0010, 0x1030),  # Patient Weight
-    (0x0010, 0x2180),  # Occupation
-    (0x0010, 0x21B0),  # Additional Patient History
-    (0x0032, 0x1032),  # Requesting Physician
-    (0x0032, 0x1060),  # Requested Procedure Description
-    (0x0040, 0x0275),  # Request Attributes Sequence
-]
-
+# Whitelist of DICOM tags that may be persisted. Anything not in this list —
+# including all private/vendor tags and every patient identifier — is dropped
+# before the file is stored. Patient name/ID are handled explicitly below.
 SAFE_TAGS = [
+    (0x0008, 0x0016),  # SOP Class UID (required to re-serialize the file)
+    (0x0008, 0x0018),  # SOP Instance UID (required to re-serialize the file)
     (0x0008, 0x0020),  # Study Date
     (0x0008, 0x0030),  # Study Time
     (0x0008, 0x0060),  # Modality
@@ -57,36 +34,47 @@ SAFE_TAGS = [
     (0x0020, 0x0010),  # Study ID
     (0x0020, 0x0011),  # Series Number
     (0x0020, 0x0013),  # Instance Number
+    (0x0028, 0x0002),  # Samples per Pixel
+    (0x0028, 0x0004),  # Photometric Interpretation
     (0x0028, 0x0010),  # Rows
     (0x0028, 0x0011),  # Columns
     (0x0028, 0x0100),  # Bits Allocated
     (0x0028, 0x0101),  # Bits Stored
     (0x0028, 0x0102),  # High Bit
     (0x0028, 0x0103),  # Pixel Representation
+    (0x0028, 0x1052),  # Rescale Intercept
+    (0x0028, 0x1053),  # Rescale Slope
 ]
+
+# Explicitly-redacted patient identifiers. Even though the whitelist already
+# drops them, we keep them out defensively in case SAFE_TAGS is ever edited.
+_PATIENT_ID_TAGS = [
+    (0x0010, 0x0010),  # Patient Name
+    (0x0010, 0x0020),  # Patient ID
+]
+
+_PIXEL_DATA_TAG = pydicom.tag.Tag(0x7FE0, 0x0010)  # PixelData
 
 
 def anonymize_dicom(dataset: Dataset) -> Dataset:
+    """Return a copy containing ONLY whitelisted tags plus pixel data.
+
+    Whitelist approach (instead of a PHI blacklist): every tag not explicitly
+    deemed safe — including private/vendor tags and identifiers we forgot to
+    list — is removed, so the persisted file cannot leak PHI.
+    """
     anonymized = dataset.copy()
-    
-    for tag in PHI_TAGS:
-        if tag in anonymized:
-            elem = anonymized[tag]
-            if elem.VR in ['PN', 'LO', 'SH', 'ST', 'LT', 'UT', 'DA', 'TM', 'DT', 'AS', 'IS', 'DS']:
-                if elem.VR == 'PN':
-                    elem.value = "ANONYMIZED"
-                elif elem.VR in ['DA', 'DT']:
-                    elem.value = "19000101"
-                elif elem.VR == 'TM':
-                    elem.value = "000000"
-                else:
-                    elem.value = "REDACTED"
-    
-    if (0x0010, 0x0010) in anonymized:
-        anonymized.PatientName = "ANONYMIZED"
-    if (0x0010, 0x0020) in anonymized:
-        anonymized.PatientID = "ANONYMIZED"
-    
+    keep = {pydicom.tag.Tag(*tag) for tag in SAFE_TAGS} | {_PIXEL_DATA_TAG}
+
+    for elem in list(anonymized):
+        if elem.tag not in keep:
+            del anonymized[elem.tag]
+
+    # Defensive removal of patient identifiers.
+    for tag in _PATIENT_ID_TAGS:
+        if pydicom.tag.Tag(*tag) in anonymized:
+            del anonymized[pydicom.tag.Tag(*tag)]
+
     return anonymized
 
 
@@ -130,36 +118,66 @@ def normalize_pixel_array(arr: np.ndarray) -> np.ndarray:
     return arr.astype(np.uint8)
 
 
-def load_image(file_path: str) -> Tuple[Image.Image, Optional[Dict[str, Any]]]:
+def load_image(
+    file_path: str,
+) -> Tuple[Image.Image, Optional[Dict[str, Any]], str]:
+    """Load an image for inference.
+
+    Returns ``(image, metadata, persist_path)`` where ``persist_path`` is the
+    file that should be stored/encrypted:
+
+    * DICOM — a new temp file containing the *anonymized* dataset (so what is
+      encrypted at rest carries no PHI).
+    * JPEG/PNG — the original file itself.
+    """
     ext = os.path.splitext(file_path)[1].lower()
     metadata = None
-    
+
     if ext in ['.dcm', '.dicom']:
         dataset = pydicom.dcmread(file_path)
         metadata = extract_dicom_metadata(dataset)
         dataset = anonymize_dicom(dataset)
         image = dicom_to_pil(dataset)
-    else:
-        image = Image.open(file_path).convert('RGB')
-    
-    return image, metadata
+
+        anonymized_path = os.path.splitext(file_path)[0] + "_anonymized.dcm"
+        _save_anonymized_dicom(dataset, anonymized_path)
+        return image, metadata, anonymized_path
+
+    image = Image.open(file_path).convert('RGB')
+    return image, metadata, file_path
+
+
+def _save_anonymized_dicom(dataset: Dataset, output_path: str) -> None:
+    """Serialize the anonymized dataset, preserving the original transfer
+    syntax so compressed pixel data (encapsulated JPEG) survives round-trip.
+    """
+    if dataset.file_meta and getattr(dataset.file_meta, "TransferSyntaxUID", None):
+        dataset.file_meta = dataset.file_meta.copy()
+    try:
+        dataset.save_as(output_path, enforce_file_format=True)
+    except Exception as exc:
+        logger.error("Failed to re-serialize anonymized DICOM: %s", exc)
+        raise ValueError(
+            "Unable to anonymize this DICOM file (unsupported compression?). "
+            "Convert it to PNG/JPEG and retry."
+        ) from exc
 
 
 def preprocess_image(image: Image.Image, target_size: int = 224) -> np.ndarray:
     image = image.resize((target_size, target_size), Image.Resampling.LANCZOS)
-    
+
     if image.mode != 'RGB':
         image = image.convert('RGB')
-    
+
     arr = np.array(image).astype(np.float32) / 255.0
-    
+
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
     arr = (arr - mean) / std
-    
+
     arr = np.transpose(arr, (2, 0, 1))
     arr = np.expand_dims(arr, axis=0)
-    
+
     return arr
 
 

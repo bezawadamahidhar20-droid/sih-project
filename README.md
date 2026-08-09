@@ -137,13 +137,12 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-The API client targets `/api/v1` on the same origin by default
-(`VITE_API_URL` override). For local development against a backend running on
-port 8000, create `frontend/.env` with:
-
-```
-VITE_API_URL=http://localhost:8000/api/v1
-```
+The Vite dev server proxies `/api` → `http://localhost:8000`, so the UI works
+against a locally running backend out of the box (no CORS, no env vars). For
+frontend-only work without a backend, run `VITE_DEMO_MODE=1 npm run dev` — the
+app then falls back to bundled mock data with an unmissable **DEMO MODE**
+banner. Demo fallback is off by default: without the flag, network errors are
+surfaced instead of silently showing fabricated predictions.
 
 ### 3. Verify it works
 
@@ -154,8 +153,14 @@ VITE_API_URL=http://localhost:8000/api/v1
 
 ## Demo accounts
 
+> ⚠️ **The Docker stack seeds demo accounts by default (`SEED_DEMO_USERS=true`)
+> with well-known credentials.** This is intentional for the SIH demo — but
+> before any public deployment set `SEED_DEMO_USERS=false` and rotate the
+> JWT/encryption secrets in `.env`.
+
 The backend seeds these users when `SEED_DEMO_USERS=true` (default in the
-Docker stack). All passwords are `DemoPass123!`:
+Docker stack) or when `ENVIRONMENT` is not `production`. All passwords are
+`DemoPass123!`:
 
 | Username | Role | Permissions |
 | --- | --- | --- |
@@ -172,6 +177,8 @@ All routes are prefixed with `/api/v1`. JWT access tokens are returned by
 | --- | --- | --- |
 | `POST /auth/login` | public | JWT + refresh token |
 | `POST /auth/register` | doctor/radiologist | create user |
+| `PATCH /auth/me` | any role | update own `email` / `full_name` only |
+| `POST /auth/change-password` | any role | change own password (current password required) |
 | `POST /scans/upload` | any role | upload scan (encrypted at rest) |
 | `GET /scans/` | any role | list scans (staff: own only) |
 | `POST /predictions/predict/{id}` | any role | run inference + Grad-CAM |
@@ -255,14 +262,23 @@ docker-compose.yml   # postgres + backend + frontend
 
 ## Security & compliance notes
 
-- **PHI anonymization**: DICOM tags (name, ID, birth date, referring physician,
-  institution, etc.) are stripped before processing or logging.
-- **Encryption**: uploaded scans are encrypted with AES-256 (Fernet) at rest;
-  decryption happens only in memory during inference.
-- **RBAC**: doctor/radiologist = full diagnostic access; staff = upload +
-  own scans only. JWT access + refresh tokens with role claims.
-- **Audit logging**: structured JSON logs of uploads, predictions, and flags —
-  never containing PHI.
+- **PHI anonymization**: DICOM files are de-identified with a **whitelist**
+  (only safe tags + pixel data survive) and the *anonymized* file is what gets
+  encrypted and stored — the original bytes never touch disk. Private/vendor
+  tags and all patient identifiers are dropped.
+- **Encryption**: uploaded scans **and derived images** (the `original_*.png` /
+  `gradcam_*.png` renders) are encrypted with AES-256 (Fernet) at rest;
+  decryption happens only transiently in memory while serving.
+- **RBAC & object-level authorization**: doctor/radiologist = full diagnostic
+  access; staff = upload + own scans only — enforced on scan listings,
+  predictions, and image serving. Users can only edit `email`/`full_name` on
+  their own account; role changes are doctor/radiologist-only.
+- **Brute-force protection**: `POST /auth/login` is rate-limited per
+  IP + username (5 failures / 15 min, in-process — swap for Redis/nginx when
+  scaling horizontally).
+- **Audit logging**: structured JSON logs of uploads, predictions, auth
+  events, and flags — written to `AUDIT_LOG_PATH` and stdout, never containing
+  PHI. Access logs record paths only, not query strings.
 - This is **decision-support only**, not a final diagnosis. Production
   deployments require HTTPS/TLS, a HIPAA-aligned infrastructure review, and
   proper key management (never ship the `.env` from this repo).

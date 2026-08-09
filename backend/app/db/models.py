@@ -1,10 +1,10 @@
 import enum
-from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
     Column, Integer, String, DateTime, Enum, ForeignKey, Index, Text, Float, Boolean
 )
 from sqlalchemy.orm import relationship
+from app.core.timeutil import utcnow
 from app.db.session import Base
 
 
@@ -24,8 +24,8 @@ class User(Base):
     full_name = Column(String(100), nullable=True)
     role = Column(Enum(UserRole), nullable=False, default=UserRole.STAFF)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     last_login = Column(DateTime, nullable=True)
 
     predictions = relationship(
@@ -56,7 +56,7 @@ class Scan(Base):
     body_part = Column(String(50), nullable=True)
     status = Column(Enum(ScanStatus), default=ScanStatus.UPLOADED, nullable=False)
     uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     processed_at = Column(DateTime, nullable=True)
 
     uploader = relationship("User", foreign_keys=[uploaded_by])
@@ -85,7 +85,7 @@ class Prediction(Base):
     is_flagged = Column(Boolean, default=False)
     flagged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     flagged_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     scan = relationship("Scan", back_populates="prediction")
     user = relationship("User", back_populates="predictions", foreign_keys=[user_id])

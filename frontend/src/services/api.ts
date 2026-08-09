@@ -25,11 +25,19 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 // ---------------------------------------------------------------------------
 // Demo-mode data store. This ONLY activates when the real FastAPI backend at
-// API_BASE_URL is unreachable (network error), so the exact same API surface
+// API_BASE_URL is unreachable (network error) AND the app was explicitly
+// built/run with VITE_DEMO_MODE=1. The exact same API surface
 // (methods/params/response shapes) is used whether wired to a live backend
 // or previewed standalone. Every method below still attempts the real HTTP
 // call first.
+//
+// Without VITE_DEMO_MODE, a network error is surfaced as an error instead of
+// being silently swapped for fabricated predictions — a medical UI must never
+// invent results.
 // ---------------------------------------------------------------------------
+const DEMO_MODE_ENABLED =
+  import.meta.env.VITE_DEMO_MODE === '1' || import.meta.env.VITE_DEMO_MODE === 'true';
+
 let demoMode = false;
 const demoScans = generateMockScans(26);
 let demoPredictions = generateMockPredictions(demoScans);
@@ -38,6 +46,10 @@ let demoUser: User | null = null;
 function isNetworkError(err: unknown): boolean {
   const e = err as AxiosError;
   return !!e && !e.response;
+}
+
+function canFallbackToDemo(err: unknown): boolean {
+  return DEMO_MODE_ENABLED && isNetworkError(err);
 }
 
 class ApiService {
@@ -114,7 +126,7 @@ class ApiService {
   }
 
   isDemoMode(): boolean {
-    return demoMode || localStorage.getItem('demo_mode') === '1';
+    return DEMO_MODE_ENABLED && (demoMode || localStorage.getItem('demo_mode') === '1');
   }
 
   async login(credentials: LoginRequest): Promise<Token> {
@@ -127,7 +139,7 @@ class ApiService {
       localStorage.removeItem('demo_mode');
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       // Fall back to local demo auth so the UI is fully explorable without a
       // live backend.
       const entry = DEMO_USERS[credentials.username];
@@ -161,7 +173,7 @@ class ApiService {
       const response = await this.client.get<User>('/auth/me');
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       demoMode = true;
       localStorage.setItem('demo_mode', '1');
       return demoUser ?? DEMO_USERS.doctor.user;
@@ -203,7 +215,7 @@ class ApiService {
       });
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       // Simulate progress + a demo upload record.
       await new Promise<void>((resolve) => {
         let pct = 0;
@@ -242,7 +254,7 @@ class ApiService {
       const response = await this.client.post<Prediction>(`/predictions/${id}/flag`, { flagged });
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       demoPredictions = demoPredictions.map((p) =>
         p.id === id
           ? { ...p, is_flagged: flagged, flagged_by: flagged ? 1 : null, flagged_at: flagged ? new Date().toISOString() : null }
@@ -271,7 +283,7 @@ class ApiService {
       const response = await this.client.get<ScanListResponse>('/scans', { params });
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       let filtered = [...demoScans];
       if (params?.status_filter) filtered = filtered.filter((s) => s.status === params.status_filter);
       if (params?.patient_id)
@@ -294,7 +306,7 @@ class ApiService {
       const response = await this.client.get<Scan>(`/scans/${id}`);
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       const scan = demoScans.find((s) => s.id === id);
       if (!scan) throw err;
       return scan;
@@ -310,7 +322,7 @@ class ApiService {
       const response = await this.client.post<PredictResponse>(`/predictions/predict/${scanId}`);
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       await new Promise((r) => setTimeout(r, 1400));
       const scan = demoScans.find((s) => s.id === scanId);
       if (!scan) throw err;
@@ -362,7 +374,7 @@ class ApiService {
       const response = await this.client.get<PredictionListResponse>('/predictions', { params });
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       let filtered = [...demoPredictions];
       if (params?.patient_id)
         filtered = filtered.filter((p) => p.scan?.anonymized_patient_id?.includes(params.patient_id!));
@@ -387,7 +399,7 @@ class ApiService {
       const response = await this.client.get<Prediction>(`/predictions/${id}`);
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       const pred = demoPredictions.find((p) => p.id === id);
       if (!pred) throw err;
       return pred;
@@ -399,7 +411,7 @@ class ApiService {
       const response = await this.client.get<Prediction[]>(`/predictions/patient/${patientId}/history`);
       return response.data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       return demoPredictions
         .filter((p) => p.scan?.anonymized_patient_id === patientId)
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -417,7 +429,7 @@ class ApiService {
       if ((data as any).status === 'healthy') (data as any).status = 'ok';
       return data;
     } catch (err) {
-      if (!isNetworkError(err)) throw err;
+      if (!canFallbackToDemo(err)) throw err;
       demoMode = true;
       localStorage.setItem('demo_mode', '1');
       return DEMO_HEALTH;

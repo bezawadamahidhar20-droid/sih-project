@@ -1,11 +1,14 @@
 import os
 import json
+import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
+from starlette.background import BackgroundTask
 
 from app.api.deps import get_current_active_user, require_roles
 from app.api.schemas import (
@@ -13,8 +16,9 @@ from app.api.schemas import (
     FlagPredictionRequest, ScanResponse,
 )
 from app.core.config import get_settings
-from app.core.security import decrypt_file
+from app.core.security import decrypt_file, encrypt_file
 from app.core.logging import audit_logger, get_logger
+from app.core.timeutil import utcnow
 from app.db.session import get_db
 from app.db.models import Scan, Prediction, User, UserRole, ScanStatus
 from app.services.image_processing import load_image, preprocess_image, create_overlay_image, save_image
@@ -27,6 +31,61 @@ router = APIRouter(prefix="/predictions", tags=["predictions"])
 
 GRADCAM_DIR = os.path.join(settings.upload_dir, "gradcam")
 os.makedirs(GRADCAM_DIR, exist_ok=True)
+
+
+def _run_inference_sync(
+    scan: Scan,
+    temp_decrypted: str,
+    input_size: int,
+    upload_dir: str,
+) -> tuple[dict, str]:
+    """Decrypt -> load -> predict -> render & encrypt derived images.
+
+    Executed in a worker thread (see ``run_in_threadpool``) because all of
+    this is CPU/IO-bound work that would otherwise block the event loop and
+    stall the entire API.
+
+    Returns ``(result, gradcam_path)`` where ``gradcam_path`` is the logical
+    (unencrypted) path stored on the Prediction row; the physical files on
+    disk are encrypted as ``<name>.enc``.
+    """
+    decrypt_file(scan.encrypted_path, temp_decrypted)
+    image, _, persist_path = load_image(temp_decrypted)
+
+    # For DICOM, load_image() writes a transient anonymized copy — it is only
+    # needed for the read, so remove it immediately (the decrypt temp itself
+    # is cleaned up by the caller's ``finally``).
+    if persist_path != temp_decrypted and os.path.exists(persist_path):
+        os.remove(persist_path)
+
+    input_np = preprocess_image(image, input_size)
+
+    model_service = get_model_service()
+    result = model_service.predict_with_gradcam(input_np)
+
+    gradcam_dir = os.path.join(upload_dir, "gradcam")
+    os.makedirs(gradcam_dir, exist_ok=True)
+
+    gradcam_path = os.path.join(gradcam_dir, f"gradcam_{scan.file_hash}.png")
+    original_path = os.path.join(gradcam_dir, f"original_{scan.file_hash}.png")
+
+    gradcam_overlay = create_overlay_image(image, result["gradcam"])
+    save_image(gradcam_overlay, gradcam_path)
+    save_image(image, original_path)
+
+    # Derived images are patient data too: encrypt them at rest and only
+    # decrypt transiently when serving (see get_prediction_image). The
+    # ``finally`` guarantees no cleartext PNG survives — even if encryption
+    # fails mid-way, nothing plaintext is left behind.
+    try:
+        encrypt_file(gradcam_path, gradcam_path + ".enc")
+        encrypt_file(original_path, original_path + ".enc")
+    finally:
+        for p in (gradcam_path, original_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+    return result, gradcam_path
 
 
 @router.post("/predict/{scan_id}", response_model=PredictResponse)
@@ -62,30 +121,31 @@ async def predict_scan(
     scan.status = ScanStatus.PROCESSING
     await db.commit()
 
-    temp_decrypted = os.path.join(settings.upload_dir, f"decrypt_{scan.file_hash}.tmp")
+    # Decrypt to a temp file that keeps the original upload extension so
+    # load_image() can tell DICOM apart from JPEG/PNG.
+    orig_ext = os.path.splitext(scan.original_filename)[1].lower() or ".png"
+    temp_decrypted = os.path.join(settings.upload_dir, f"decrypt_{scan.file_hash}{orig_ext}")
 
     try:
-        decrypt_file(scan.encrypted_path, temp_decrypted)
-        image, _ = load_image(temp_decrypted)
-
-        input_np = preprocess_image(image, settings.model_input_size)
-
-        model_service = get_model_service()
-        result = model_service.predict_with_gradcam(input_np)
-
-        gradcam_filename = f"gradcam_{scan.file_hash}.png"
-        gradcam_path = os.path.join(GRADCAM_DIR, gradcam_filename)
-
-        gradcam_overlay = create_overlay_image(image, result["gradcam"])
-        save_image(gradcam_overlay, gradcam_path)
-
-        original_image_path = os.path.join(GRADCAM_DIR, f"original_{scan.file_hash}.png")
-        save_image(image, original_image_path)
+        # CPU/IO-bound inference runs off the event loop so a single
+        # prediction cannot stall the whole API (healthchecks, other
+        # uploads, ...).
+        result, gradcam_path = await run_in_threadpool(
+            _run_inference_sync,
+            scan,
+            temp_decrypted,
+            settings.model_input_size,
+            settings.upload_dir,
+        )
 
         probabilities = dict(
             zip(settings.model_classes, result["probabilities"])
         )
 
+        # "Abnormal" = anything that is not the first configured class
+        # (default: "Normal"). Class-NAME based so reordering MODEL_CLASSES
+        # cannot silently invert the flag.
+        normal_class = settings.model_classes[0] if settings.model_classes else "Normal"
         prediction = Prediction(
             scan_id=scan.id,
             user_id=current_user.id,
@@ -98,13 +158,13 @@ async def predict_scan(
             model_architecture=result["engine"],
             is_low_confidence=result["confidence"] < settings.low_confidence_threshold,
             is_high_risk=(
-                result["predicted_class"] != 0
+                result["class_name"] != normal_class
                 and result["confidence"] > settings.high_risk_threshold
             ),
         )
 
         scan.status = ScanStatus.COMPLETED
-        scan.processed_at = datetime.utcnow()
+        scan.processed_at = utcnow()
 
         db.add(prediction)
         await db.commit()
@@ -295,7 +355,7 @@ async def flag_prediction(
 
     prediction.is_flagged = request.flagged
     prediction.flagged_by = current_user.id if request.flagged else None
-    prediction.flagged_at = datetime.utcnow() if request.flagged else None
+    prediction.flagged_at = utcnow() if request.flagged else None
 
     await db.commit()
     await db.refresh(prediction)
@@ -313,14 +373,45 @@ async def flag_prediction(
     return _to_prediction_response(prediction, _gradcam_url(prediction))
 
 
+async def _scan_for_image(db: AsyncSession, filename: str) -> Optional[Scan]:
+    """Map a derived-image filename (``original_<hash>.png`` / ``gradcam_<hash>.png``)
+    back to the owning Scan so object-level authorization can be applied.
+    """
+    for prefix in ("original_", "gradcam_"):
+        if filename.startswith(prefix):
+            hash_part = filename[len(prefix):].rsplit(".", 1)[0]
+            result = await db.execute(select(Scan).where(Scan.file_hash == hash_part))
+            return result.scalar_one_or_none()
+    return None
+
+
+def _cleanup_temp(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 @router.get("/image/{filename}")
 async def get_prediction_image(
     filename: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     # Defense-in-depth against path traversal: the filename must be a plain
     # basename and the resolved path must stay inside the gradcam directory.
+    # (Checked before any DB lookup so junk input costs nothing.)
     if os.path.basename(filename) != filename:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Object-level authorization: the filename embeds the owning scan's file
+    # hash, so resolve it back to a Scan and enforce the same ownership rule
+    # as the scan endpoints (staff see their own uploads only).
+    scan = await _scan_for_image(db, filename)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    if current_user.role == UserRole.STAFF and scan.uploaded_by != current_user.id:
         raise HTTPException(status_code=404, detail="Image not found")
 
     file_path = os.path.join(GRADCAM_DIR, filename)
@@ -328,10 +419,25 @@ async def get_prediction_image(
     gradcam_real = os.path.realpath(GRADCAM_DIR)
     if not resolved.startswith(gradcam_real + os.sep):
         raise HTTPException(status_code=404, detail="Image not found")
+
+    from fastapi.responses import FileResponse
+
+    # Derived images are stored encrypted (``<name>.png.enc``). Decrypt into a
+    # transient temp file, serve it, then delete it. Legacy plaintext files
+    # (created before this fix) are still served directly.
+    encrypted_path = resolved + ".enc"
+    if os.path.exists(encrypted_path):
+        temp_out = os.path.join(GRADCAM_DIR, f".tmp_{uuid.uuid4().hex}.png")
+        decrypt_file(encrypted_path, temp_out)
+        return FileResponse(
+            temp_out,
+            media_type="image/png",
+            background=BackgroundTask(_cleanup_temp, temp_out),
+        )
+
     if not os.path.exists(resolved):
         raise HTTPException(status_code=404, detail="Image not found")
 
-    from fastapi.responses import FileResponse
     return FileResponse(resolved)
 
 
