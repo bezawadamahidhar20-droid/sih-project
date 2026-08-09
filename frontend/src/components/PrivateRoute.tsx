@@ -1,22 +1,22 @@
 import { Navigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import { ReactNode } from 'react';
+import { Box, CircularProgress, Stack, Typography } from '@mui/material';
+import { useAuth } from '../context/AuthContext';
+import { AppShell } from './layout/AppShell';
 
-interface PrivateRouteProps {
-  children: ReactNode;
-}
-
-export function PrivateRoute({ children }: PrivateRouteProps) {
+export function PrivateRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full border-2 border-blue-200 border-t-blue-600 animate-spin" />
-          <p className="text-sm text-slate-500">Loading MediScan AI…</p>
-        </div>
-      </div>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Stack spacing={2} sx={{ alignItems: 'center' }}>
+          <CircularProgress />
+          <Typography variant="body2" color="text.secondary">
+            Loading MediScan AI…
+          </Typography>
+        </Stack>
+      </Box>
     );
   }
 
@@ -24,5 +24,5 @@ export function PrivateRoute({ children }: PrivateRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
-  return <>{children}</>;
+  return <AppShell>{children}</AppShell>;
 }

@@ -13,6 +13,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isDemoMode: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (data: {
     username: string;
@@ -79,8 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
-  const hasRole = (roles: UserRole[]) =>
-    user ? roles.includes(user.role) : false;
+  const hasRole = (roles: UserRole[]) => (user ? roles.includes(user.role) : false);
 
   return (
     <AuthContext.Provider
@@ -88,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         isLoading,
+        isDemoMode: api.isDemoMode(),
         login,
         register,
         logout,

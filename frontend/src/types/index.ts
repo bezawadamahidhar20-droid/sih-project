@@ -38,6 +38,7 @@ export interface Scan {
   uploaded_by: number;
   created_at: string;
   processed_at: string | null;
+  thumbnail_url?: string | null;
 }
 
 export interface Prediction {

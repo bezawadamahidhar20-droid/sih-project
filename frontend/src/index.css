@@ -1,9 +1,17 @@
-@import "tailwindcss";
-
 /* Base font */
 :root {
   font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
 }
 
 /* Smooth scrolling */
@@ -11,67 +19,26 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Remove button focus outline; use our own */
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid #3b82f6;
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
 /* Consistent scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
+  background: #c7d2d9;
+  border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #a7b8c3;
 }
 
-/* Range input track */
-input[type='range'] {
-  accent-color: #3b82f6;
-}
-
-/* Shimmer keyframe for loading */
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
-}
-
-/* Pulse dots */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* Table row transitions */
-tbody tr {
-  transition: background-color 0.1s ease;
-}
-
-/* Card hover */
-.card-hover {
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-.card-hover:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transform: translateY(-1px);
-}
-
-/* Print: hide sidebar */
+/* Print: hide navigation chrome */
 @media print {
-  aside {
+  nav,
+  header {
     display: none !important;
   }
 }

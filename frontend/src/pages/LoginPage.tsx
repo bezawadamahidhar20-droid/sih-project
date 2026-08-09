@@ -1,32 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Eye,
-  EyeOff,
-  Stethoscope,
-  Shield,
-  Lock,
-  User,
-  AlertCircle,
-  Loader2,
-  CheckCircle,
-  Activity,
-  Brain,
-  FileSearch,
-} from 'lucide-react';
+  Box,
+  Paper,
+  TextField,
+  Button,
+  Typography,
+  Stack,
+  IconButton,
+  InputAdornment,
+  Alert,
+  Checkbox,
+  FormControlLabel,
+  Chip,
+} from '@mui/material';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import LocalHospitalRoundedIcon from '@mui/icons-material/LocalHospitalRounded';
+import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
+import LockRoundedIcon from '@mui/icons-material/LockRounded';
+import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
+import VerifiedUserRoundedIcon from '@mui/icons-material/VerifiedUserRounded';
+import PsychologyRoundedIcon from '@mui/icons-material/PsychologyRounded';
+import ManageSearchRoundedIcon from '@mui/icons-material/ManageSearchRounded';
+import MonitorHeartRoundedIcon from '@mui/icons-material/MonitorHeartRounded';
 import { useAuth } from '../context/AuthContext';
+
+const FEATURES = [
+  {
+    icon: PsychologyRoundedIcon,
+    title: 'AI-Powered Analysis',
+    desc: 'Deep learning classifier with Grad-CAM heatmap visualization',
+  },
+  {
+    icon: ManageSearchRoundedIcon,
+    title: 'Full Explainability',
+    desc: 'See exactly where the model focused its attention',
+  },
+  {
+    icon: MonitorHeartRoundedIcon,
+    title: 'Clinical Safety UX',
+    desc: 'Low-confidence results flagged for mandatory review',
+  },
+];
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
-  const [username, setUsername] = useState(
-    () => localStorage.getItem('mediscan_remember_username') ?? ''
-  );
+  const [username, setUsername] = useState(() => localStorage.getItem('mediscan_remember_username') ?? '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(
-    () => Boolean(localStorage.getItem('mediscan_remember_username'))
-  );
+  const [rememberMe, setRememberMe] = useState(() => Boolean(localStorage.getItem('mediscan_remember_username')));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -34,279 +58,220 @@ export function LoginPage() {
     if (!rememberMe) localStorage.removeItem('mediscan_remember_username');
   }, [rememberMe]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    if (isAuthenticated) navigate('/', { replace: true });
+  }, [isAuthenticated, navigate]);
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      if (rememberMe) {
-        localStorage.setItem('mediscan_remember_username', username);
-      }
+      if (rememberMe) localStorage.setItem('mediscan_remember_username', username);
       await login(username, password);
       navigate('/', { replace: true });
     } catch (err: any) {
-      setError(
-        err.response?.data?.detail || 'Invalid username or password. Please try again.'
-      );
+      setError(err.response?.data?.detail || 'Invalid username or password. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (isAuthenticated) {
-    navigate('/', { replace: true });
-    return null;
-  }
+  const quickFill = (u: string) => {
+    setUsername(u);
+    setPassword('DemoPass123!');
+  };
 
   return (
-    <div className="min-h-screen bg-white flex">
-      {/* Left panel — branding */}
-      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-slate-900 p-12">
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-            <Stethoscope className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <p className="text-white font-bold text-lg leading-tight">MediScan AI</p>
-            <p className="text-slate-400 text-xs">Clinical Intelligence Platform</p>
-          </div>
-        </div>
+    <Box sx={{ minHeight: '100vh', display: 'flex', bgcolor: '#fff' }}>
+      {/* Left branding panel */}
+      <Box
+        sx={{
+          display: { xs: 'none', lg: 'flex' },
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          width: '50%',
+          p: 7,
+          background: 'linear-gradient(160deg,#081a29 0%,#0b2338 55%,#0a3f60 100%)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: 'url(/images/login-hero.jpg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: 0.22,
+          }}
+        />
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', position: 'relative' }}>
+          <Box sx={{ width: 44, height: 44, borderRadius: 2.5, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LocalHospitalRoundedIcon sx={{ color: '#fff' }} />
+          </Box>
+          <Box>
+            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 18, lineHeight: 1.2 }}>MediScan AI</Typography>
+            <Typography sx={{ color: '#93a9ba', fontSize: 12 }}>Clinical Intelligence Platform</Typography>
+          </Box>
+        </Stack>
 
-        {/* Center content */}
-        <div className="space-y-8">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-600/20 border border-blue-500/30">
-              <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              <span className="text-blue-300 text-xs font-medium">AI-Assisted Diagnostics</span>
-            </div>
-            <h1 className="text-4xl font-bold text-white leading-tight">
+        <Stack spacing={4} sx={{ position: 'relative' }}>
+          <Stack spacing={2}>
+            <Chip
+              size="small"
+              label="AI-Assisted Diagnostics"
+              sx={{ alignSelf: 'flex-start', bgcolor: 'rgba(61,128,168,0.2)', color: '#8fc4e6', border: '1px solid rgba(61,128,168,0.4)' }}
+            />
+            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 34, lineHeight: 1.2 }}>
               Clinical-grade AI for medical imaging
-            </h1>
-            <p className="text-slate-400 text-base leading-relaxed max-w-md">
-              Upload chest X-rays and CT scans. Receive AI-powered diagnostic
-              support with Grad-CAM explainability, confidence scoring, and
-              clinical review workflows.
-            </p>
-          </div>
+            </Typography>
+            <Typography sx={{ color: '#93a9ba', fontSize: 15, maxWidth: 420, lineHeight: 1.7 }}>
+              Upload chest X-rays and CT scans. Receive AI-powered diagnostic support with Grad-CAM
+              explainability, confidence scoring, and clinical review workflows.
+            </Typography>
+          </Stack>
 
-          {/* Feature highlights */}
-          <div className="grid gap-4">
+          <Stack spacing={2.5}>
+            {FEATURES.map((f) => (
+              <Stack key={f.title} direction="row" spacing={1.75} sx={{ alignItems: 'flex-start' }}>
+                <Box
+                  sx={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 2,
+                    bgcolor: 'rgba(61,128,168,0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <f.icon sx={{ fontSize: 18, color: '#8fc4e6' }} />
+                </Box>
+                <Box>
+                  <Typography sx={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{f.title}</Typography>
+                  <Typography sx={{ color: '#7d93a3', fontSize: 12.5, mt: 0.25 }}>{f.desc}</Typography>
+                </Box>
+              </Stack>
+            ))}
+          </Stack>
+        </Stack>
+
+        <Box sx={{ position: 'relative' }}>
+          <Box sx={{ height: '1px', bgcolor: 'rgba(255,255,255,0.1)', mb: 2 }} />
+          <Stack direction="row" spacing={3} sx={{ flexWrap: 'wrap' }}>
             {[
-              {
-                icon: Brain,
-                title: 'AI-Powered Analysis',
-                desc: 'Deep learning classifier with Grad-CAM heatmap visualization',
-              },
-              {
-                icon: FileSearch,
-                title: 'Full Explainability',
-                desc: 'See exactly where the model focused its attention',
-              },
-              {
-                icon: Activity,
-                title: 'Clinical Safety UX',
-                desc: 'Low-confidence results flagged for mandatory review',
-              },
-            ].map((feature) => {
-              const Icon = feature.icon;
-              return (
-                <div key={feature.title} className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-blue-600/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Icon className="w-4.5 h-4.5 text-blue-400" />
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-semibold">
-                      {feature.title}
-                    </p>
-                    <p className="text-slate-400 text-xs mt-0.5">{feature.desc}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+              { icon: ShieldRoundedIcon, text: 'Secure clinical access' },
+              { icon: LockRoundedIcon, text: 'Role-based access control' },
+              { icon: VerifiedUserRoundedIcon, text: 'Protected diagnostic data' },
+            ].map((item) => (
+              <Stack key={item.text} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                <item.icon sx={{ fontSize: 15, color: '#5d7386' }} />
+                <Typography sx={{ color: '#5d7386', fontSize: 12 }}>{item.text}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+      </Box>
 
-        {/* Security footer */}
-        <div className="space-y-3">
-          <div className="h-px bg-slate-800" />
-          <div className="flex items-center gap-6">
-            {[
-              { icon: Shield, text: 'Secure clinical access' },
-              { icon: Lock, text: 'Role-based access control' },
-              { icon: CheckCircle, text: 'Protected diagnostic data' },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.text} className="flex items-center gap-1.5">
-                  <Icon className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-slate-500 text-xs">{item.text}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+      {/* Right form panel */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 4, bgcolor: 'background.default' }}>
+        <Box sx={{ width: '100%', maxWidth: 380 }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 5, display: { lg: 'none' } }}>
+            <Box sx={{ width: 42, height: 42, borderRadius: 2.5, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <LocalHospitalRoundedIcon sx={{ color: '#fff' }} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 17 }}>MediScan AI</Typography>
+              <Typography variant="caption" color="text.secondary">Clinical Intelligence Platform</Typography>
+            </Box>
+          </Stack>
 
-      {/* Right panel — login form */}
-      <div className="flex-1 flex flex-col justify-center items-center px-6 py-12 bg-slate-50">
-        {/* Mobile logo */}
-        <div className="lg:hidden flex items-center gap-3 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-            <Stethoscope className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <p className="text-slate-800 font-bold text-lg leading-tight">MediScan AI</p>
-            <p className="text-slate-500 text-xs">Clinical Intelligence Platform</p>
-          </div>
-        </div>
+          <Typography variant="h2" sx={{ mb: 0.5 }}>Sign in</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+            Access your clinical diagnostic workspace
+          </Typography>
 
-        <div className="w-full max-w-sm">
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold text-slate-800">Sign in</h2>
-            <p className="text-slate-500 text-sm mt-1">
-              Access your clinical diagnostic workspace
-            </p>
-          </div>
+          <Paper variant="outlined" sx={{ p: 3.5, borderRadius: 3 }}>
+            <form onSubmit={handleSubmit}>
+              <Stack spacing={2.5}>
+                {error && <Alert severity="error">{error}</Alert>}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="username"
-                className="text-sm font-medium text-slate-700"
-              >
-                Username
-              </label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  id="username"
-                  type="text"
+                <TextField
+                  label="Username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
-                  placeholder="Enter your username"
-                  autoComplete="username"
+                  fullWidth
                   autoFocus
                   required
                   disabled={loading}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <PersonRoundedIcon fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
                 />
-              </div>
-            </div>
 
-            {/* Password */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="password"
-                className="text-sm font-medium text-slate-700"
-              >
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  id="password"
+                <TextField
+                  label="Password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
+                  fullWidth
                   required
                   disabled={loading}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <LockRoundedIcon fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => setShowPassword((s) => !s)} edge="end">
+                            {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  tabIndex={-1}
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
 
-            {/* Remember me */}
-            <div className="flex items-center gap-2">
-              <input
-                id="remember"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
-              />
-              <label
-                htmlFor="remember"
-                className="text-sm text-slate-600"
-              >
-                Remember my username on this device
-              </label>
-            </div>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />}
+                  label={<Typography variant="body2">Remember username</Typography>}
+                />
 
-            {/* Error */}
-            {error && (
-              <div
-                className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-4 py-3"
-                role="alert"
-              >
-                <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{error}</p>
-              </div>
-            )}
+                <Button type="submit" variant="contained" size="large" fullWidth disabled={loading}>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </Button>
+              </Stack>
+            </form>
+          </Paper>
 
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={loading || !username || !password}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-sm rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Signing in…
-                </>
-              ) : (
-                'Sign in to MediScan AI'
-              )}
-            </button>
-          </form>
-
-          {/* Demo note */}
-          <div className="mt-6 p-4 rounded-lg border border-slate-200 bg-white">
-            <p className="text-xs text-slate-500 font-medium mb-2">
-              Demo accounts (development environment):
-            </p>
-            <div className="space-y-1">
-              {[
-                { user: 'doctor', role: 'Full access' },
-                { user: 'radiologist', role: 'Full access' },
-                { user: 'staff', role: 'Upload + own scans' },
-              ].map((d) => (
-                <div key={d.user} className="flex items-center justify-between">
-                  <code className="text-xs bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono">
-                    {d.user}
-                  </code>
-                  <span className="text-xs text-slate-400">{d.role}</span>
-                </div>
+          <Stack spacing={1} sx={{ mt: 3 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+              Demo accounts (password: DemoPass123!)
+            </Typography>
+            <Stack direction="row" spacing={1} sx={{ justifyContent: 'center', flexWrap: 'wrap' }}>
+              {['doctor', 'radiologist', 'staff'].map((u) => (
+                <Chip key={u} label={u} size="small" variant="outlined" onClick={() => quickFill(u)} sx={{ cursor: 'pointer' }} />
               ))}
-            </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Password: <code className="text-slate-500 font-mono">DemoPass123!</code>
-            </p>
-          </div>
+            </Stack>
+          </Stack>
 
-          {/* Security note */}
-          <p className="mt-4 text-center text-xs text-slate-400">
-            AI output is decision-support only — not a final clinical diagnosis.
-          </p>
-        </div>
-      </div>
-    </div>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mt: 3 }}>
+            Decision-support tool only. Not a substitute for professional clinical judgment.
+          </Typography>
+        </Box>
+      </Box>
+    </Box>
   );
 }
