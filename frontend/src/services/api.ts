@@ -1,5 +1,19 @@
-import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { Token, LoginRequest, User, Scan, Prediction, PredictResponse, ScanListResponse, PredictionListResponse, HealthResponse } from '../types';
+import axios, {
+  AxiosInstance,
+  AxiosError,
+  InternalAxiosRequestConfig,
+} from 'axios';
+import {
+  Token,
+  LoginRequest,
+  User,
+  Scan,
+  Prediction,
+  PredictResponse,
+  ScanListResponse,
+  PredictionListResponse,
+  HealthResponse,
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -10,9 +24,7 @@ class ApiService {
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       timeout: 120000,
     });
 
@@ -30,15 +42,14 @@ class ApiService {
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
-        const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
-
+        const originalRequest = error.config as InternalAxiosRequestConfig & {
+          _retry?: boolean;
+        };
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
-
           if (!this.refreshTokenPromise) {
             this.refreshTokenPromise = this.refreshAccessToken();
           }
-
           try {
             const newToken = await this.refreshTokenPromise;
             if (originalRequest.headers) {
@@ -53,7 +64,6 @@ class ApiService {
             this.refreshTokenPromise = null;
           }
         }
-
         return Promise.reject(error);
       }
     );
@@ -61,18 +71,13 @@ class ApiService {
 
   private async refreshAccessToken(): Promise<string> {
     const refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) {
-      throw new Error('No refresh token');
-    }
-
-    const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+    if (!refreshToken) throw new Error('No refresh token');
+    const response = await axios.post<Token>(`${API_BASE_URL}/auth/refresh`, {
       refresh_token: refreshToken,
     });
-
     const { access_token, refresh_token } = response.data;
     localStorage.setItem('access_token', access_token);
     localStorage.setItem('refresh_token', refresh_token);
-
     return access_token;
   }
 
@@ -90,7 +95,9 @@ class ApiService {
     return response.data;
   }
 
-  async register(userData: Partial<User> & { password: string }): Promise<User> {
+  async register(
+    userData: Partial<User> & { password: string }
+  ): Promise<User> {
     const response = await this.client.post<User>('/auth/register', userData);
     return response.data;
   }
@@ -113,14 +120,17 @@ class ApiService {
   async uploadScan(
     file: File,
     anonymizedPatientId?: string,
-    onProgress?: (progress: { loaded: number; total: number; percentage: number }) => void
+    onProgress?: (progress: {
+      loaded: number;
+      total: number;
+      percentage: number;
+    }) => void
   ): Promise<Scan> {
     const formData = new FormData();
     formData.append('file', file);
     if (anonymizedPatientId) {
       formData.append('anonymized_patient_id', anonymizedPatientId);
     }
-
     const response = await this.client.post<Scan>('/scans/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (progressEvent) => {
@@ -128,7 +138,9 @@ class ApiService {
           onProgress({
             loaded: progressEvent.loaded,
             total: progressEvent.total,
-            percentage: Math.round((progressEvent.loaded / progressEvent.total) * 100),
+            percentage: Math.round(
+              (progressEvent.loaded / progressEvent.total) * 100
+            ),
           });
         }
       },
@@ -137,28 +149,30 @@ class ApiService {
   }
 
   async flagPrediction(id: number, flagged: boolean): Promise<Prediction> {
-    const response = await this.client.post<Prediction>(`/predictions/${id}/flag`, { flagged });
+    const response = await this.client.post<Prediction>(
+      `/predictions/${id}/flag`,
+      { flagged }
+    );
     return response.data;
   }
 
-  /**
-   * Fetch a protected image (e.g. scan or heatmap) as a blob so the JWT can
-   * be sent via the Authorization header (a plain <img> tag cannot do that).
-   * Returns an object URL that must be revoked by the caller.
-   */
   async fetchImageBlob(fullUrl: string): Promise<string> {
     const path = fullUrl.replace(/^\/api\/v1/, '');
-    const response = await this.client.get<Blob>(path, { responseType: 'blob' });
+    const response = await this.client.get<Blob>(path, {
+      responseType: 'blob',
+    });
     return URL.createObjectURL(response.data);
   }
 
   async getScans(params?: {
     page?: number;
     page_size?: number;
-    status?: string;
+    status_filter?: string;
     patient_id?: string;
   }): Promise<ScanListResponse> {
-    const response = await this.client.get<ScanListResponse>('/scans/', { params });
+    const response = await this.client.get<ScanListResponse>('/scans', {
+      params,
+    });
     return response.data;
   }
 
@@ -172,7 +186,9 @@ class ApiService {
   }
 
   async predict(scanId: number): Promise<PredictResponse> {
-    const response = await this.client.post<PredictResponse>(`/predictions/predict/${scanId}`);
+    const response = await this.client.post<PredictResponse>(
+      `/predictions/predict/${scanId}`
+    );
     return response.data;
   }
 
@@ -185,7 +201,10 @@ class ApiService {
     flagged?: boolean;
     from_date?: string;
   }): Promise<PredictionListResponse> {
-    const response = await this.client.get<PredictionListResponse>('/predictions/', { params });
+    const response = await this.client.get<PredictionListResponse>(
+      '/predictions',
+      { params }
+    );
     return response.data;
   }
 
@@ -195,7 +214,9 @@ class ApiService {
   }
 
   async getPatientHistory(patientId: string): Promise<Prediction[]> {
-    const response = await this.client.get<Prediction[]>(`/predictions/patient/${patientId}/history`);
+    const response = await this.client.get<Prediction[]>(
+      `/predictions/patient/${patientId}/history`
+    );
     return response.data;
   }
 
@@ -204,8 +225,11 @@ class ApiService {
   }
 
   async healthCheck(): Promise<HealthResponse> {
-    const response = await this.client.get<HealthResponse>('/health/');
-    return response.data;
+    const response = await this.client.get<HealthResponse>('/health');
+    const data = response.data;
+    // The backend reports "healthy"; normalize to "ok" so UI checks stay simple.
+    if (data.status === 'healthy') data.status = 'ok';
+    return data;
   }
 }
 

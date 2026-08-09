@@ -1,7 +1,8 @@
 """End-to-end tests for the upload -> predict -> heatmap loop.
 
-These tests exercise the baseline heuristic engine, so they do **not** require
-PyTorch or a trained model file to pass.
+The tests accept either inference engine: the ``baseline-heuristic`` fallback
+(used when no trained model file is present) or the ``resnet50`` CNN engine
+(used when a trained state dict exists at ``MODEL_PATH``).
 """
 
 import io
@@ -41,7 +42,7 @@ class TestFullPredictionFlow:
         pred = data["prediction"]
         assert pred["predicted_class"] in ("Normal", "Pneumonia")
         assert 0.0 <= pred["confidence"] <= 1.0
-        assert pred["model_architecture"] == "baseline-heuristic"
+        assert pred["model_architecture"] in ("baseline-heuristic", "resnet50")
         assert set(pred["all_probabilities"].keys()) == {"Normal", "Pneumonia"}
         assert pred["scan"]["id"] == scan["id"]
 

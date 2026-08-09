@@ -100,6 +100,12 @@ export interface UploadProgress {
   percentage: number;
 }
 
-export type ImageFile = File & {
-  preview?: string;
-};
+export type ImageFile = File & { preview?: string };
+
+export interface HistoryFilters {
+  patientId?: string;
+  predictedClass?: string;
+  minConfidence?: number;
+  flagged?: 'all' | 'flagged' | 'unflagged';
+  recency?: 'all' | '7' | '30' | '90';
+}

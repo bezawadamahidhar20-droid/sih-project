@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
 import { User, UserRole } from '../types';
 import { api } from '../services/api';
 
@@ -7,7 +14,13 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (data: { username: string; email: string; password: string; full_name?: string; role?: UserRole }) => Promise<void>;
+  register: (data: {
+    username: string;
+    email: string;
+    password: string;
+    full_name?: string;
+    role?: UserRole;
+  }) => Promise<void>;
   logout: () => void;
   hasRole: (roles: UserRole[]) => boolean;
   refreshUser: () => Promise<void>;
@@ -35,7 +48,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
     const token = localStorage.getItem('access_token');
-
     if (storedUser && token) {
       try {
         setUser(JSON.parse(storedUser));
@@ -51,7 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser();
   };
 
-  const register = async (data: { username: string; email: string; password: string; full_name?: string; role?: UserRole }) => {
+  const register = async (data: {
+    username: string;
+    email: string;
+    password: string;
+    full_name?: string;
+    role?: UserRole;
+  }) => {
     await api.register(data);
     await refreshUser();
   };
@@ -61,12 +79,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
-  const hasRole = (roles: UserRole[]) => {
-    return user ? roles.includes(user.role) : false;
-  };
+  const hasRole = (roles: UserRole[]) =>
+    user ? roles.includes(user.role) : false;
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, isLoading, login, register, logout, hasRole, refreshUser }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        register,
+        logout,
+        hasRole,
+        refreshUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -74,8 +102,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }

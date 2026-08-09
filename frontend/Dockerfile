@@ -1,6 +1,6 @@
 # MediScan AI — frontend
 # Stage 1: build the React app (typecheck + vite build)
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 WORKDIR /app
 

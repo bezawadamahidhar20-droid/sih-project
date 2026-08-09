@@ -1,375 +1,546 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  Alert,
-  Chip,
-  Divider,
-  Grid,
-  Stack,
-  IconButton,
-  Tooltip,
-} from '@mui/material'
-import {
-  ArrowBackOutlined,
-  UploadOutlined,
-  FlagOutlined,
-  FlagCircleOutlined,
-  RefreshOutlined,
-  MedicalInformationOutlined,
-  TimelineOutlined,
-  MemoryOutlined,
-  ScheduleOutlined,
-  PersonOutlineOutlined,
-  DescriptionOutlined,
-  ScienceOutlined,
-  ShieldOutlined,
-  WarningAmberOutlined,
-  ErrorOutlineOutlined,
-} from '@mui/icons-material'
-import { api } from '../services/api'
-import { useAuth } from '../context/AuthContext'
-import { Scan, PredictResponse } from '../types'
-import { ScanViewer } from '../components/ScanViewer'
-import { ConfidenceBar } from '../components/ConfidenceBar'
+  ArrowLeft,
+  Upload,
+  Flag,
+  RefreshCw,
+  ScanLine,
+  Clock,
+  User,
+  FileText,
+  Activity,
+  Shield,
+  AlertTriangle,
+  CheckCircle,
+  Cpu,
+  Layers,
+} from 'lucide-react';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { Scan, PredictResponse } from '../types';
+import { ScanViewer } from '../components/ScanViewer';
+import { ConfidenceMeter } from '../components/ConfidenceMeter';
+import { ClinicalSafetyBanner } from '../components/ClinicalSafetyBanner';
+import { FindingBadge } from '../components/StatusBadge';
 
-type PageStatus = 'loading' | 'processing' | 'ready' | 'error'
+type PageStatus = 'loading' | 'processing' | 'ready' | 'error';
+
+const PROCESSING_STEPS = [
+  'Decrypting and validating scan…',
+  'Normalizing image data…',
+  'Running AI inference…',
+  'Generating Grad-CAM heatmap…',
+  'Preparing clinical decision-support result…',
+];
 
 export function ResultsPage() {
-  const { scanId } = useParams<{ scanId: string }>()
-  const navigate = useNavigate()
-  const { user, hasRole } = useAuth()
-  const [status, setStatus] = useState<PageStatus>('loading')
-  const [scan, setScan] = useState<Scan | null>(null)
-  const [result, setResult] = useState<PredictResponse | null>(null)
-  const [error, setError] = useState('')
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { scanId } = useParams<{ scanId: string }>();
+  const navigate = useNavigate();
+  const { user, hasRole } = useAuth();
+  const [status, setStatus] = useState<PageStatus>('loading');
+  const [scan, setScan] = useState<Scan | null>(null);
+  const [result, setResult] = useState<PredictResponse | null>(null);
+  const [error, setError] = useState('');
+  const [processingStep, setProcessingStep] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isDoctor = hasRole(['doctor', 'radiologist'])
+  const isDoctor = hasRole(['doctor', 'radiologist']);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
-  }, [])
+    if (stepTimerRef.current) {
+      clearInterval(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+  }, []);
+
+  const startStepAnimation = useCallback(() => {
+    setProcessingStep(0);
+    stepTimerRef.current = setInterval(() => {
+      setProcessingStep((s) => Math.min(s + 1, PROCESSING_STEPS.length - 1));
+    }, 1800);
+  }, []);
 
   const runPrediction = useCallback(
     async (id: number) => {
-      setStatus('processing')
-      setError('')
+      setStatus('processing');
+      setError('');
+      startStepAnimation();
       try {
-        const res = await api.predict(id)
-        setResult(res)
-        setScan(res.scan)
-        setStatus('ready')
+        const res = await api.predict(id);
+        stopPolling();
+        setResult(res);
+        setScan(res.scan);
+        setStatus('ready');
       } catch (err: any) {
         if (err.response?.status === 409) {
-          // Another job is already processing this scan — poll until done.
-          let attempts = 0
+          let attempts = 0;
           pollRef.current = setInterval(async () => {
-            attempts += 1
+            attempts += 1;
             try {
-              const s = await api.getScan(id)
+              const s = await api.getScan(id);
               if (s.status === 'completed') {
-                stopPolling()
-                const res = await api.predict(id)
-                setResult(res)
-                setScan(res.scan)
-                setStatus('ready')
+                stopPolling();
+                const res = await api.predict(id);
+                setResult(res);
+                setScan(res.scan);
+                setStatus('ready');
               } else if (s.status === 'failed') {
-                stopPolling()
-                setError('Analysis failed for this scan. It may be an unsupported or corrupted image.')
-                setStatus('error')
+                stopPolling();
+                setError(
+                  'Analysis failed for this scan. It may be an unsupported or corrupted image.'
+                );
+                setStatus('error');
               } else if (attempts > 20) {
-                stopPolling()
-                setError('Analysis is taking longer than expected. Please try again.')
-                setStatus('error')
+                stopPolling();
+                setError('Analysis is taking longer than expected. Please try again.');
+                setStatus('error');
               }
             } catch {
-              stopPolling()
-              setError('Failed to reach the analysis service.')
-              setStatus('error')
+              stopPolling();
+              setError('Failed to reach the analysis service.');
+              setStatus('error');
             }
-          }, 2000)
+          }, 2000);
         } else {
-          setError(err.response?.data?.detail || err.message || 'Analysis failed')
-          setStatus('error')
+          stopPolling();
+          setError(err.response?.data?.detail || err.message || 'Analysis failed.');
+          setStatus('error');
         }
       }
     },
-    [stopPolling]
-  )
+    [stopPolling, startStepAnimation]
+  );
 
   useEffect(() => {
-    let active = true
-    const id = Number(scanId)
+    let active = true;
+    const id = Number(scanId);
     if (!Number.isFinite(id)) {
-      setError('Invalid scan reference.')
-      setStatus('error')
-      return
+      setError('Invalid scan reference.');
+      setStatus('error');
+      return;
     }
-    setStatus('loading')
+    setStatus('loading');
     api
       .getScan(id)
       .then((s) => {
-        if (!active) return
-        setScan(s)
-        if (s.status === 'completed' || s.status === 'uploaded' || s.status === 'failed') {
-          void runPrediction(id)
-        } else {
-          setStatus('processing')
-        }
+        if (!active) return;
+        setScan(s);
+        void runPrediction(id);
       })
       .catch((err: any) => {
-        if (!active) return
-        setError(err.response?.data?.detail || 'Scan not found.')
-        setStatus('error')
-      })
+        if (!active) return;
+        setError(err.response?.data?.detail || 'Scan not found.');
+        setStatus('error');
+      });
     return () => {
-      active = false
-      stopPolling()
-    }
+      active = false;
+      stopPolling();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanId])
+  }, [scanId]);
 
   const handleFlagToggle = async () => {
-    if (!result) return
+    if (!result) return;
     try {
-      const updated = await api.flagPrediction(result.prediction.id, !result.prediction.is_flagged)
-      setResult((prev) => (prev ? { ...prev, prediction: updated } : prev))
+      const updated = await api.flagPrediction(
+        result.prediction.id,
+        !result.prediction.is_flagged
+      );
+      setResult((prev) => (prev ? { ...prev, prediction: updated } : prev));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Could not update flag.')
+      setError(err.response?.data?.detail || 'Could not update flag.');
     }
-  }
+  };
 
-  const findingIsAbnormal = result?.prediction.predicted_class !== 'Normal'
+  const pred = result?.prediction;
+
+  // Determine safety banner variant
+  let safetyVariant: 'normal' | 'low-confidence' | 'flagged' | 'critical' = 'normal';
+  if (pred?.is_flagged) safetyVariant = 'flagged';
+  else if (pred?.is_high_risk) safetyVariant = 'critical';
+  else if (pred?.is_low_confidence) safetyVariant = 'low-confidence';
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton onClick={() => navigate(-1)} aria-label="Go back">
-            <ArrowBackOutlined />
-          </IconButton>
-          <Box>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>
-              Diagnostic Result
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
+    <div className="space-y-4">
+      {/* Top bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-all"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Diagnostic Result</h2>
+            <p className="text-xs text-slate-500">
               {scan?.original_filename ?? 'Loading scan…'}
-            </Typography>
-          </Box>
-        </Box>
-        <Button variant="outlined" startIcon={<UploadOutlined />} onClick={() => navigate('/upload')}>
-          New scan
-        </Button>
-      </Box>
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/upload')}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm hover:bg-slate-50 transition-all"
+          >
+            <Upload className="w-4 h-4" />
+            New scan
+          </button>
+        </div>
+      </div>
 
+      {/* Error */}
       {error && (
-        <Alert
-          severity="error"
-          sx={{ mb: 3 }}
-          action={
-            <Button color="inherit" size="small" startIcon={<RefreshOutlined />} onClick={() => runPrediction(Number(scanId))}>
-              Retry
-            </Button>
-          }
-        >
-          {error}
-        </Alert>
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+          <p className="text-sm text-red-700 flex-1">{error}</p>
+          <button
+            onClick={() => runPrediction(Number(scanId))}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-all flex-shrink-0"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        </div>
       )}
 
-      {status === 'ready' && result && (
-        <Grid container spacing={3}>
-          {/* Viewer */}
-          <Grid item xs={12} lg={8}>
-            <Card>
-              <CardContent>
-                <ScanViewer
-                  originalUrl={result.original_image_url}
-                  overlayUrl={result.gradcam_overlay_url}
-                  filename={scan?.original_filename}
-                />
-              </CardContent>
-            </Card>
-          </Grid>
-
-          {/* Findings panel */}
-          <Grid item xs={12} lg={4}>
-            <Stack spacing={2}>
-              <Card>
-                <CardContent>
-                  <Typography variant="overline" color="text.secondary">
-                    Predicted finding
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.75 }}>
-                    <Chip
-                      icon={findingIsAbnormal ? <MedicalInformationOutlined /> : <ShieldOutlined />}
-                      label={result.prediction.predicted_class}
-                      sx={{
-                        fontWeight: 700,
-                        fontSize: '0.9375rem',
-                        color: findingIsAbnormal ? '#B3261E' : '#1E7B45',
-                        backgroundColor: findingIsAbnormal ? '#FDF4F3' : '#F0F8F3',
-                        border: `1px solid ${findingIsAbnormal ? '#E5B8B5' : '#B7D9C3'}`,
-                      }}
+      {/* Processing state */}
+      {(status === 'loading' || status === 'processing') && (
+        <div className="bg-white border border-slate-200 rounded-xl p-10 flex flex-col items-center gap-6">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full border-4 border-blue-100" />
+            <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-transparent border-t-blue-600 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Cpu className="w-6 h-6 text-blue-600" />
+            </div>
+          </div>
+          <div className="text-center space-y-2 max-w-sm">
+            <p className="text-base font-semibold text-slate-800">
+              {status === 'loading' ? 'Loading scan…' : 'Analyzing scan…'}
+            </p>
+            {status === 'processing' && (
+              <>
+                <p className="text-sm text-slate-500">
+                  {PROCESSING_STEPS[processingStep]}
+                </p>
+                <div className="flex items-center justify-center gap-1 mt-2">
+                  {PROCESSING_STEPS.map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-1 rounded-full transition-all duration-500 ${
+                        i <= processingStep ? 'bg-blue-600 w-6' : 'bg-slate-200 w-3'
+                      }`}
                     />
-                    <Chip
-                      size="small"
-                      label={result.prediction.model_architecture}
-                      variant="outlined"
-                      title="Inference engine"
-                    />
-                  </Box>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
-                  <Box sx={{ mt: 2 }}>
-                    <ConfidenceBar
-                      confidence={result.prediction.confidence}
-                      probabilities={result.prediction.all_probabilities}
-                      showProbabilityTable
-                    />
-                  </Box>
+      {/* Ready state */}
+      {status === 'ready' && result && pred && (
+        <>
+          {/* Safety banner */}
+          <ClinicalSafetyBanner variant={safetyVariant} />
 
+          {/* Main 3-column layout */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+            {/* Image viewer — 5 cols */}
+            <div className="xl:col-span-5" style={{ minHeight: 500 }}>
+              <ScanViewer
+                originalUrl={result.original_image_url}
+                overlayUrl={result.gradcam_overlay_url}
+                filename={scan?.original_filename}
+              />
+            </div>
+
+            {/* AI Result panel — 4 cols */}
+            <div className="xl:col-span-4 space-y-4">
+              {/* Prediction */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-blue-500" />
+                    AI Analysis
+                  </h3>
+                  <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
+                    Decision-support result
+                  </span>
+                </div>
+
+                {/* Finding */}
+                <div className="p-4 rounded-lg border border-slate-100 bg-slate-50 mb-4">
+                  <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mb-2">
+                    AI-Assisted Finding
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <FindingBadge predictedClass={pred.predicted_class} size="md" />
+                  </div>
                   {result.warning && (
-                    <Alert severity={result.prediction.is_high_risk ? 'error' : 'warning'} sx={{ mt: 2 }} icon={result.prediction.is_high_risk ? <ErrorOutlineOutlined /> : <WarningAmberOutlined />}>
+                    <div className="flex items-start gap-2 mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                       {result.warning}
-                    </Alert>
+                    </div>
                   )}
-                </CardContent>
-              </Card>
+                  <p className="text-xs text-slate-400 mt-2 italic">
+                    Requires clinical review
+                  </p>
+                </div>
 
-              <Card>
-                <CardContent>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                    <Typography variant="overline" color="text.secondary">
-                      Review workflow
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1}>
-                    {isDoctor ? (
-                      <Button
-                        variant={result.prediction.is_flagged ? 'outlined' : 'contained'}
-                        color={result.prediction.is_flagged ? 'primary' : 'primary'}
-                        startIcon={result.prediction.is_flagged ? <FlagCircleOutlined /> : <FlagOutlined />}
-                        fullWidth
-                        onClick={handleFlagToggle}
-                      >
-                        {result.prediction.is_flagged ? 'Unflag for review' : 'Flag for review'}
-                      </Button>
-                    ) : (
-                      <Tooltip title="Only doctors and radiologists can flag results for review.">
-                        <span style={{ width: '100%' }}>
-                          <Button variant="outlined" disabled fullWidth startIcon={<FlagOutlined />}>
-                            Flag for review
-                          </Button>
-                        </span>
-                      </Tooltip>
-                    )}
-                  </Stack>
-                  {result.prediction.is_flagged && (
-                    <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1.5, color: '#12507E' }}>
-                      <FlagCircleOutlined fontSize="inherit" />
-                      Flagged on {result.prediction.flagged_at ? new Date(result.prediction.flagged_at).toLocaleString() : 'recently'} for clinical review.
-                    </Typography>
+                {/* Confidence meter */}
+                <ConfidenceMeter
+                  confidence={pred.confidence}
+                  probabilities={pred.all_probabilities}
+                  showTable={true}
+                />
+              </div>
+
+              {/* Review workflow — doctors/radiologists only */}
+              {isDoctor && (
+                <div className="bg-white border border-slate-200 rounded-xl p-5">
+                  <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                    <Flag className="w-4 h-4 text-blue-500" />
+                    Review Workflow
+                  </h3>
+
+                  {pred.is_flagged && pred.flagged_at && (
+                    <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3">
+                      Flagged on {new Date(pred.flagged_at).toLocaleString()} for
+                      clinical review.
+                    </div>
                   )}
-                </CardContent>
-              </Card>
 
-              <Card>
-                <CardContent>
-                  <Typography variant="overline" color="text.secondary">
-                    Scan information
-                  </Typography>
-                  <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-                    {[
-                      { icon: <PersonOutlineOutlined fontSize="small" />, label: 'Patient ID', value: scan?.anonymized_patient_id ?? '—' },
-                      { icon: <DescriptionOutlined fontSize="small" />, label: 'File', value: scan?.original_filename ?? '—' },
-                      { icon: <MedicalInformationOutlined fontSize="small" />, label: 'Modality', value: scan?.modality ?? '—' },
-                      { icon: <ScienceOutlined fontSize="small" />, label: 'Body part', value: scan?.body_part ?? '—' },
-                      { icon: <ScheduleOutlined fontSize="small" />, label: 'Study date', value: scan?.study_date ? new Date(scan.study_date).toLocaleDateString() : '—' },
-                      { icon: <TimelineOutlined fontSize="small" />, label: 'Inference time', value: result.prediction.processing_time_ms != null ? `${Math.round(result.prediction.processing_time_ms)} ms` : '—' },
-                      { icon: <MemoryOutlined fontSize="small" />, label: 'Engine', value: result.prediction.model_architecture },
-                      { icon: <ShieldOutlined fontSize="small" />, label: 'Model version', value: result.prediction.model_version },
-                    ].map((row) => (
-                      <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box sx={{ color: 'text.secondary', display: 'flex' }}>{row.icon}</Box>
-                        <Typography variant="caption" color="text.secondary" sx={{ width: 96, flexShrink: 0 }}>
-                          {row.label}
-                        </Typography>
-                        <Typography variant="body2" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {row.value}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Stack>
+                  <button
+                    onClick={handleFlagToggle}
+                    className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all border ${
+                      pred.is_flagged
+                        ? 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    }`}
+                  >
+                    <Flag className="w-4 h-4" />
+                    {pred.is_flagged ? 'Unflag for review' : 'Flag for review'}
+                  </button>
+                </div>
+              )}
 
-                  <Divider sx={{ my: 2 }} />
+              {!isDoctor && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500 flex items-start gap-2">
+                  <Shield className="w-4 h-4 flex-shrink-0 mt-0.5 text-slate-400" />
+                  Only doctors and radiologists can flag results for review.
+                </div>
+              )}
+            </div>
 
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    {result.prediction.is_low_confidence && (
-                      <Chip icon={<WarningAmberOutlined />} label="Below clinical threshold" size="small" sx={{ color: '#9A6700', backgroundColor: '#FBF5E9', border: '1px solid #D9BE8A' }} />
-                    )}
-                    {result.prediction.is_high_risk && (
-                      <Chip icon={<ErrorOutlineOutlined />} label="High-risk finding" size="small" sx={{ color: '#B3261E', backgroundColor: '#FDF4F3', border: '1px solid #E5B8B5' }} />
-                    )}
-                    {result.prediction.is_flagged && (
-                      <Chip icon={<FlagOutlined />} label="Flagged for review" size="small" sx={{ color: '#12507E', backgroundColor: '#EAF2FA', border: '1px solid #9DB8CF' }} />
-                    )}
-                  </Box>
+            {/* Scan metadata — 3 cols */}
+            <div className="xl:col-span-3 space-y-4">
+              {/* Scan info */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                  <ScanLine className="w-4 h-4 text-slate-400" />
+                  Scan Information
+                </h3>
+                <dl className="space-y-2.5">
+                  {[
+                    {
+                      icon: User,
+                      label: 'Patient ID',
+                      value: scan?.anonymized_patient_id ?? '—',
+                      mono: true,
+                    },
+                    {
+                      icon: FileText,
+                      label: 'File',
+                      value: scan?.original_filename ?? '—',
+                    },
+                    {
+                      icon: ScanLine,
+                      label: 'Modality',
+                      value: scan?.modality ?? '—',
+                    },
+                    {
+                      icon: Activity,
+                      label: 'Body part',
+                      value: scan?.body_part ?? '—',
+                    },
+                    {
+                      icon: Clock,
+                      label: 'Study date',
+                      value: scan?.study_date
+                        ? new Date(scan.study_date).toLocaleDateString()
+                        : '—',
+                    },
+                    {
+                      icon: Clock,
+                      label: 'Inference time',
+                      value:
+                        pred.processing_time_ms != null
+                          ? `${Math.round(pred.processing_time_ms)} ms`
+                          : '—',
+                    },
+                    {
+                      icon: Cpu,
+                      label: 'Engine',
+                      value: pred.model_architecture,
+                      mono: true,
+                    },
+                    {
+                      icon: Shield,
+                      label: 'Model version',
+                      value: pred.model_version,
+                      mono: true,
+                    },
+                  ].map((row) => {
+                    const Icon = row.icon;
+                    return (
+                      <div key={row.label} className="flex items-start gap-2">
+                        <Icon className="w-3.5 h-3.5 text-slate-300 flex-shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-xs text-slate-400">{row.label}</p>
+                          <p
+                            className={`text-xs font-medium text-slate-700 truncate ${
+                              row.mono ? 'font-mono' : ''
+                            }`}
+                          >
+                            {row.value}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </div>
 
-                  <Alert severity="info" icon={<ShieldOutlined />} sx={{ mt: 2 }}>
-                    <Typography variant="caption">
-                      This AI output is decision-support only and does not constitute a final diagnosis.
-                      Findings should be confirmed by a qualified clinician.
-                    </Typography>
-                  </Alert>
-                </CardContent>
-              </Card>
-            </Stack>
-          </Grid>
-        </Grid>
+              {/* Status chips */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">
+                  Clinical Flags
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {pred.is_low_confidence && (
+                    <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border font-medium bg-amber-50 text-amber-700 border-amber-200">
+                      <AlertTriangle className="w-3 h-3" />
+                      Low confidence
+                    </span>
+                  )}
+                  {pred.is_high_risk && (
+                    <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border font-medium bg-red-50 text-red-700 border-red-200">
+                      <AlertTriangle className="w-3 h-3" />
+                      High risk finding
+                    </span>
+                  )}
+                  {pred.is_flagged && (
+                    <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border font-medium bg-blue-50 text-blue-700 border-blue-200">
+                      <Flag className="w-3 h-3" />
+                      Flagged for review
+                    </span>
+                  )}
+                  {!pred.is_low_confidence && !pred.is_high_risk && !pred.is_flagged && (
+                    <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border font-medium bg-emerald-50 text-emerald-700 border-emerald-200">
+                      <CheckCircle className="w-3 h-3" />
+                      No flags
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Logged as */}
+              <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="text-xs text-slate-400">
+                  Accessed by{' '}
+                  <span className="font-medium text-slate-600">
+                    {user?.full_name || user?.username}
+                  </span>{' '}
+                  ({user?.role}) ·{' '}
+                  {user?.role === 'staff'
+                    ? 'Staff view: history restricted to own uploads.'
+                    : 'Full diagnostic access.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Explainability section */}
+          {result.gradcam_overlay_url && (
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Layers className="w-4 h-4 text-blue-500" />
+                <h3 className="text-sm font-semibold text-slate-800">
+                  Why did the AI predict this?
+                </h3>
+                <span className="text-xs text-slate-400 ml-auto">
+                  Grad-CAM Explainability
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                <div>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                    The heatmap below visualizes which regions of the scan the AI
+                    model considered most significant when making its prediction.
+                    Higher-attention areas appear in warmer colors (red/yellow),
+                    while lower-attention areas appear cooler (blue/green).
+                  </p>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    This is a{' '}
+                    <span className="font-medium">decision-support finding</span>{' '}
+                    based on{' '}
+                    <span className="font-medium">
+                      {pred.predicted_class}
+                    </span>{' '}
+                    with{' '}
+                    <span className="font-medium">
+                      {Math.round(pred.confidence * 100)}% confidence
+                    </span>
+                    . A qualified clinician should review these highlighted regions
+                    before any clinical action.
+                  </p>
+
+                  {/* Legend */}
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                      Attention Legend
+                    </p>
+                    <div className="flex items-center gap-3">
+                      {[
+                        { color: '#3b82f6', label: 'Low attention' },
+                        { color: '#22c55e', label: 'Moderate' },
+                        { color: '#f59e0b', label: 'High' },
+                        { color: '#ef4444', label: 'Peak attention' },
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center gap-1.5">
+                          <div
+                            className="w-3 h-3 rounded-sm flex-shrink-0"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-xs text-slate-500">{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-64 bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
+                  <ScanViewer
+                    originalUrl={result.original_image_url}
+                    overlayUrl={result.gradcam_overlay_url}
+                    filename={null}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
-
-      {status === 'processing' && (
-        <Card>
-          <CardContent>
-            <ScanViewer filename={scan?.original_filename} loading loadingLabel="Running diagnostic model…" />
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                Step 1/2 — Decrypting and normalizing scan… <span role="img" aria-hidden>✓</span>
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Step 2/2 — Running inference and generating Grad-CAM heatmap…
-              </Typography>
-            </Box>
-          </CardContent>
-        </Card>
-      )}
-
-      {status === 'loading' && (
-        <Card>
-          <CardContent>
-            <ScanViewer loading loadingLabel="Loading scan…" />
-          </CardContent>
-        </Card>
-      )}
-
-      {status === 'error' && !error && (
-        <Card>
-          <CardContent>
-            <Typography color="text.secondary">Unable to load this scan.</Typography>
-          </CardContent>
-        </Card>
-      )}
-
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 3 }}>
-        Logged in as {user?.full_name || user?.username} ({user?.role}) · {user?.role === 'staff' ? 'Staff view: history restricted to your own uploads.' : 'Full diagnostic access.'}
-      </Typography>
-    </Box>
-  )
+    </div>
+  );
 }
