@@ -15,6 +15,12 @@ class TestHealth:
         assert data["status"] == "healthy"
         assert "version" in data
         assert "engine" in data
+        # The trained CNN ships with the repo: production must report it loaded
+        # and must NOT be silently running the dev-only heuristic engine.
+        assert data["model_loaded"] is True
+        assert data["engine"] != "baseline-heuristic"
+        assert "model_path" in data
+        assert data["heuristic_fallback_active"] is False
 
 
 class TestAuth:

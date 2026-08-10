@@ -8,8 +8,14 @@ Usage (from the ``backend/`` directory, after activating the venv)::
         --arch resnet50 --epochs 10 --batch-size 16 --output ./models/model.pth
 
 The produced ``model.pth`` is a plain ``model.state_dict()``. Drop it at the
-path configured by ``MODEL_PATH`` and the API will switch from the baseline
-heuristic engine to the trained CNN + Grad-CAM engine automatically.
+path configured by ``MODEL_PATH`` and the API will use the trained
+CNN + Grad-CAM engine. (With no model file present and
+``ALLOW_HEURISTIC_FALLBACK=false`` the API fails loudly — it never silently
+serves heuristic guesses in production.)
+
+Class imbalance is handled by default via inverse-frequency class weights in
+the loss (``--class-weights auto``); ``--max-train-samples`` enables a
+seeded stratified subsample of the training split for CPU feasibility.
 
 Model selection metric: **sensitivity (recall of the abnormal class)** by
 default, per the roadmap's "minimize false negatives" requirement.
@@ -59,6 +65,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--momentum", type=float, default=0.9)
     p.add_argument("--freeze-backbone", action="store_true",
                    help="Freeze all layers except the classification head")
+    p.add_argument("--class-weights", type=str, default="auto",
+                   choices=["auto", "none"],
+                   help="'auto' = inverse-frequency class weights in the loss "
+                        "(handles class imbalance); 'none' = unweighted")
+    p.add_argument("--max-train-samples", type=int, default=None,
+                   help="Stratified subsample of the training split (for CPU "
+                        "feasibility). Keeps the same class ratio; val/test are "
+                        "never subsampled.")
     p.add_argument("--patience", type=int, default=5,
                    help="Early stopping after N epochs without improvement")
     p.add_argument("--positive-class", type=str, default="Pneumonia",
@@ -125,6 +139,45 @@ def _save_checkpoint(model, output: Path, summary: dict) -> None:
     print(f"[train] Saved training summary -> {summary_path}")
 
 
+def _class_weights(args, class_names: List[str], class_counts: List[int]):
+    """Inverse-frequency weights normalized to mean 1.
+
+    With ``NORMAL: 1207, PNEUMONIA: 3488`` this yields ~[1.66, 0.57], so the
+    minority class contributes more per-sample gradient signal without
+    inflating the total loss scale.
+    """
+    if args.class_weights != "auto" or len(class_names) <= 1:
+        return None
+    total = sum(class_counts) or 1
+    freq = [c / total for c in class_counts]
+    inv = [1.0 / max(f, 1e-6) for f in freq]
+    mean_inv = sum(inv) / len(inv)
+    weights = [w / mean_inv for w in inv]
+    print(f"[train] Class weights ({args.class_weights}): "
+          f"{dict(zip(class_names, [round(w, 4) for w in weights]))}")
+    return weights
+
+
+def _stratified_subset(train_ds, max_samples: int, seed: int):
+    """Return a torch Subset with ``max_samples`` rows, stratified by class."""
+    import torch
+
+    from torch.utils.data import Subset
+
+    rng = random.Random(seed)
+    by_class: dict = {}
+    for idx, (_, label) in enumerate(train_ds.samples):
+        by_class.setdefault(int(label), []).append(idx)
+    n_per_class = max(1, max_samples // len(by_class))
+    chosen = []
+    for label, idxs in sorted(by_class.items()):
+        k = min(n_per_class, len(idxs))
+        chosen.extend(rng.sample(idxs, k))
+    print(f"[train] Stratified subsample: {len(chosen)}/{len(train_ds)} training "
+          f"rows (per class: {sorted((k, len(v)) for k, v in by_class.items())})")
+    return Subset(train_ds, sorted(chosen))
+
+
 def _dataset_splits(args, transform_train, transform_val):
     """Resolve train/val datasets from the CLI args."""
     from app.models.data import build_dataset
@@ -182,8 +235,23 @@ def main() -> None:
         default_transforms(args.input_size, train=True),
         default_transforms(args.input_size, train=False),
     )
+
+    # Class distribution of the FULL training split (before any subsampling)
+    # — used for imbalance reporting and for inverse-frequency class weights.
+    from collections import Counter
+    orig_counts = Counter(int(lbl) for _, lbl in train_ds.samples)
+
+    if args.max_train_samples:
+        train_ds = _stratified_subset(train_ds, args.max_train_samples, args.seed)
+        # torch Subset proxies __getitem__/__len__ but not custom attributes;
+        # carry the class metadata across so callers keep working unchanged.
+        train_ds.class_names = train_ds.dataset.class_names
+        train_ds.class_to_idx = train_ds.dataset.class_to_idx
+
     print(f"[train] Training samples: {len(train_ds)}  classes: {train_ds.class_names}")
     print(f"[train] Validation samples: {len(val_ds)}")
+    print(f"[train] Original train class distribution: "
+          f"{dict(zip(train_ds.class_names, [orig_counts.get(i, 0) for i in range(len(train_ds.class_names))]))}")
 
     # Resolve which class index is the 'abnormal' (positive) class.
     if args.positive_class not in train_ds.class_names:
@@ -201,6 +269,15 @@ def main() -> None:
 
     model, _ = build_pretrained_model(args.arch, args.num_classes, device)
 
+    # Inverse-frequency weights from the FULL training split (so the weight
+    # ratio reflects the real data even when --max-train-samples is used).
+    class_counts = [orig_counts.get(i, 0) for i in range(len(train_ds.class_names))]
+    weights = _class_weights(args, train_ds.class_names, class_counts)
+    criterion = torch.nn.CrossEntropyLoss(
+        weight=torch.tensor(weights, dtype=torch.float32).to(device)
+        if weights else None
+    )
+
     if args.freeze_backbone:
         for name, param in model.named_parameters():
             # Freeze everything except the classification head.
@@ -214,7 +291,6 @@ def main() -> None:
     optimizer = torch.optim.SGD(trainable, lr=args.lr, momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    criterion = torch.nn.CrossEntropyLoss()
 
     output = Path(args.output)
     best_score = -1.0
@@ -299,6 +375,10 @@ def main() -> None:
                 "per_class": report,
                 "history": history,
                 "frozen_backbone": args.freeze_backbone,
+                "class_weights": "auto" if weights else "none",
+                "max_train_samples": args.max_train_samples,
+                "train_samples": len(train_ds),
+                "val_samples": len(val_ds),
             }
             _save_checkpoint(model, output, best_summary)
         else:

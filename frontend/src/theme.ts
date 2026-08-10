@@ -1,5 +1,12 @@
 import { createTheme, alpha } from '@mui/material/styles';
 
+// ---------------------------------------------------------------------------
+// MediScan AI — Design system (generated with ui-ux-pro-max "Trust & Authority")
+// Style: Trust & Authority · WCAG AAA · Light mode
+// Typography: Figtree (headings) + Noto Sans (body) — medical, trustworthy
+// Motion: subtle micro-interactions only (150–300ms), prefers-reduced-motion safe
+// ---------------------------------------------------------------------------
+
 // Calm clinical palette: deep blue/teal primary, white/light-grey surfaces.
 // Red is reserved strictly for flagged / low-confidence / critical states.
 const palette = {
@@ -46,6 +53,21 @@ const palette = {
   divider: '#e2e9ee',
 };
 
+// Elevation tokens — soft, layered shadows instead of flat borders
+const shadows = {
+  card: '0 1px 2px rgba(15,36,48,0.05), 0 4px 16px -4px rgba(15,36,48,0.08)',
+  cardHover: '0 2px 4px rgba(15,36,48,0.06), 0 14px 28px -10px rgba(15,36,48,0.18)',
+  pop: '0 4px 12px rgba(15,36,48,0.08), 0 18px 40px -12px rgba(15,36,48,0.22)',
+};
+
+// Motion tokens — subtle, deliberate, reduced-motion friendly
+const motion = {
+  fast: '150ms',
+  base: '200ms',
+  slow: '300ms',
+  ease: 'cubic-bezier(0.4, 0, 0.2, 1)',
+};
+
 export const theme = createTheme({
   palette: {
     mode: 'light',
@@ -64,10 +86,12 @@ export const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 10,
+    borderRadius: 12,
   },
   typography: {
+    // Heading + body pairing from ui-ux-pro-max (Trust & Authority)
     fontFamily: [
+      '"Noto Sans"',
       'Inter',
       '-apple-system',
       'BlinkMacSystemFont',
@@ -77,19 +101,58 @@ export const theme = createTheme({
       'Arial',
       'sans-serif',
     ].join(','),
-    h1: { fontWeight: 700, fontSize: '2.25rem', letterSpacing: '-0.02em' },
-    h2: { fontWeight: 700, fontSize: '1.875rem', letterSpacing: '-0.02em' },
-    h3: { fontWeight: 700, fontSize: '1.5rem', letterSpacing: '-0.01em' },
-    h4: { fontWeight: 700, fontSize: '1.25rem' },
-    h5: { fontWeight: 700, fontSize: '1.1rem' },
-    h6: { fontWeight: 600, fontSize: '1rem' },
-    subtitle1: { fontWeight: 600, fontSize: '0.95rem' },
-    subtitle2: { fontWeight: 600, fontSize: '0.8rem', color: palette.text.secondary },
-    body1: { fontSize: '0.925rem' },
-    body2: { fontSize: '0.825rem' },
-    button: { fontWeight: 600, textTransform: 'none' as const },
-    caption: { fontSize: '0.75rem' },
-    overline: { fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em' },
+    // Apple-style type discipline: leading tightens as size grows, tracking goes
+    // negative on display sizes and stays near 0 for body text.
+    h1: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 700,
+      fontSize: '2.125rem',
+      lineHeight: 1.15,
+      letterSpacing: '-0.03em',
+      fontOpticalSizing: 'auto',
+    },
+    h2: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 700,
+      fontSize: '1.75rem',
+      lineHeight: 1.2,
+      letterSpacing: '-0.025em',
+      fontOpticalSizing: 'auto',
+    },
+    h3: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 700,
+      fontSize: '1.375rem',
+      lineHeight: 1.3,
+      letterSpacing: '-0.018em',
+      fontOpticalSizing: 'auto',
+    },
+    h4: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 700,
+      fontSize: '1.15rem',
+      lineHeight: 1.35,
+      letterSpacing: '-0.01em',
+    },
+    h5: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 700,
+      fontSize: '1.05rem',
+      lineHeight: 1.4,
+    },
+    h6: {
+      fontFamily: 'Figtree, "Noto Sans", Inter, sans-serif',
+      fontWeight: 600,
+      fontSize: '0.95rem',
+      lineHeight: 1.45,
+    },
+    subtitle1: { fontWeight: 600, fontSize: '0.95rem', lineHeight: 1.55, letterSpacing: '0.005em' },
+    subtitle2: { fontWeight: 600, fontSize: '0.82rem', lineHeight: 1.55, color: palette.text.secondary, letterSpacing: '0.01em' },
+    body1: { fontSize: '0.925rem', lineHeight: 1.7, letterSpacing: '0.002em' },
+    body2: { fontSize: '0.825rem', lineHeight: 1.65, letterSpacing: '0.004em' },
+    button: { fontWeight: 600, textTransform: 'none' as const, letterSpacing: '0.01em' },
+    caption: { fontSize: '0.75rem', lineHeight: 1.55, letterSpacing: '0.01em' },
+    overline: { fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.1em' },
   },
   spacing: 8,
   components: {
@@ -97,22 +160,55 @@ export const theme = createTheme({
       styleOverrides: {
         body: {
           backgroundColor: palette.background.default,
+          WebkitFontSmoothing: 'antialiased',
+          MozOsxFontSmoothing: 'grayscale',
+          fontOpticalSizing: 'auto',
         },
-        '::-webkit-scrollbar': { width: 8, height: 8 },
+        // Accessible, brand-tinted focus ring for keyboard navigation
+        ':focus-visible': {
+          outline: `2px solid ${alpha(palette.primary.main, 0.65)}`,
+          outlineOffset: 2,
+        },
+        '::-webkit-scrollbar': { width: 9, height: 9 },
         '::-webkit-scrollbar-track': { background: 'transparent' },
         '::-webkit-scrollbar-thumb': {
-          background: palette.background.paper === '#ffffff' ? '#c7d2d9' : '#333',
+          background: '#c3cfd7',
           borderRadius: 8,
+          border: '2px solid transparent',
+          backgroundClip: 'content-box',
         },
+        '::-webkit-scrollbar-thumb:hover': { background: '#a7b8c3', backgroundClip: 'content-box', border: '2px solid transparent' },
       },
     },
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { borderRadius: 8, paddingTop: 8, paddingBottom: 8 },
+        root: {
+          borderRadius: 10,
+          paddingTop: 8,
+          paddingBottom: 8,
+          transition: `background-color ${motion.base} ${motion.ease}, box-shadow ${motion.base} ${motion.ease}, border-color ${motion.base} ${motion.ease}, transform ${motion.base} ${motion.ease}`,
+        },
         contained: {
           boxShadow: 'none',
-          '&:hover': { boxShadow: '0 4px 14px rgba(15,92,140,0.25)' },
+          '&:hover': {
+            boxShadow: '0 4px 14px rgba(15,92,140,0.28)',
+            transform: 'translateY(-1px)',
+          },
+          '&:active': { transform: 'translateY(0)' },
+        },
+        outlined: {
+          '&:hover': { borderColor: palette.primary.main, bgcolor: alpha(palette.primary.main, 0.05) },
+        },
+        text: {
+          '&:hover': { bgcolor: alpha(palette.primary.main, 0.06) },
+        },
+      },
+    },
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          transition: `background-color ${motion.base} ${motion.ease}`,
         },
       },
     },
@@ -124,26 +220,44 @@ export const theme = createTheme({
         outlined: {
           borderColor: palette.divider,
         },
+        elevation1: { boxShadow: shadows.card },
+        elevation2: { boxShadow: shadows.card },
+        elevation3: { boxShadow: shadows.cardHover },
+        elevation4: { boxShadow: shadows.cardHover },
+        elevation8: { boxShadow: shadows.pop },
+        elevation16: { boxShadow: shadows.pop },
+        elevation24: { boxShadow: shadows.pop },
       },
     },
     MuiCard: {
       styleOverrides: {
         root: {
           border: `1px solid ${palette.divider}`,
-          boxShadow: '0 1px 2px rgba(15,36,48,0.04)',
+          boxShadow: shadows.card,
+          transition: `box-shadow ${motion.base} ${motion.ease}, transform ${motion.base} ${motion.ease}, border-color ${motion.base} ${motion.ease}`,
         },
       },
     },
     MuiChip: {
       styleOverrides: {
-        root: { fontWeight: 600 },
+        root: {
+          fontWeight: 600,
+          transition: `all ${motion.fast} ${motion.ease}`,
+        },
+        clickable: {
+          '&:hover': {
+            transform: 'translateY(-1px)',
+            boxShadow: '0 2px 8px rgba(15,36,48,0.12)',
+          },
+        },
       },
     },
+    // Note: glass treatment (backdrop-filter + translucent bg) lives in TopBar.tsx,
+    // where the material is actually configured — keep a single source of truth.
     MuiAppBar: {
       styleOverrides: {
         root: {
           boxShadow: 'none',
-          borderBottom: `1px solid ${palette.divider}`,
         },
       },
     },
@@ -151,11 +265,14 @@ export const theme = createTheme({
       styleOverrides: {
         head: {
           fontWeight: 700,
-          fontSize: '0.72rem',
+          fontSize: '0.7rem',
           textTransform: 'uppercase',
-          letterSpacing: '0.04em',
+          letterSpacing: '0.05em',
           color: palette.text.secondary,
           backgroundColor: palette.background.default,
+        },
+        root: {
+          borderBottomColor: alpha(palette.divider, 0.8),
         },
       },
     },
@@ -163,12 +280,93 @@ export const theme = createTheme({
       styleOverrides: {
         tooltip: {
           fontSize: '0.72rem',
+          borderRadius: 8,
+          boxShadow: shadows.card,
+        },
+      },
+    },
+    MuiMenu: {
+      styleOverrides: {
+        paper: {
+          borderRadius: 14,
+          boxShadow: shadows.pop,
+          border: `1px solid ${alpha(palette.divider, 0.9)}`,
+          padding: 4,
+          // Translucent floating material (Apple-style glass)
+          backgroundColor: alpha('#ffffff', 0.88),
+          backdropFilter: 'blur(14px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(14px) saturate(160%)',
+          '@media (prefers-reduced-transparency: reduce)': {
+            backgroundColor: '#ffffff',
+            backdropFilter: 'none',
+            WebkitBackdropFilter: 'none',
+          },
+        },
+      },
+    },
+    MuiMenuItem: {
+      styleOverrides: {
+        root: {
+          borderRadius: 8,
+          transition: `background-color ${motion.fast} ${motion.ease}`,
         },
       },
     },
     MuiLinearProgress: {
       styleOverrides: {
         root: { borderRadius: 8, height: 8 },
+      },
+    },
+    MuiTabs: {
+      styleOverrides: {
+        indicator: {
+          height: 3,
+          borderRadius: '3px 3px 0 0',
+        },
+      },
+    },
+    MuiTab: {
+      styleOverrides: {
+        root: {
+          textTransform: 'none',
+          fontWeight: 600,
+          transition: `color ${motion.base} ${motion.ease}`,
+        },
+      },
+    },
+    MuiToggleButton: {
+      styleOverrides: {
+        root: {
+          textTransform: 'none',
+          fontWeight: 600,
+          transition: `all ${motion.fast} ${motion.ease}`,
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          borderRadius: 10,
+          transition: `box-shadow ${motion.fast} ${motion.ease}`,
+          '&.Mui-focused': {
+            boxShadow: `0 0 0 3px ${alpha(palette.primary.main, 0.14)}`,
+          },
+        },
+      },
+    },
+    MuiAlert: {
+      styleOverrides: {
+        root: { borderRadius: 12 },
+        outlined: {
+          borderWidth: 1.5,
+        },
+      },
+    },
+    MuiListItemButton: {
+      styleOverrides: {
+        root: {
+          transition: `background-color ${motion.base} ${motion.ease}, color ${motion.base} ${motion.ease}`,
+        },
       },
     },
   },

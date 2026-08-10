@@ -22,6 +22,8 @@ import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
+import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { Prediction, UserRole } from '../../types';
@@ -89,7 +91,23 @@ export function TopBar({
     .toUpperCase();
 
   return (
-    <AppBar position="sticky" color="inherit" sx={{ bgcolor: 'background.paper' }}>
+    <AppBar
+      position="sticky"
+      color="inherit"
+      sx={{
+        bgcolor: 'rgba(255,255,255,0.72)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        borderBottom: '1px solid rgba(255,255,255,0.45)',
+        '@media (prefers-reduced-transparency: reduce)': {
+          bgcolor: '#ffffff',
+          backdropFilter: 'none',
+          WebkitBackdropFilter: 'none',
+          borderBottom: '1px solid',
+          borderBottomColor: 'divider',
+        },
+      }}
+    >
       <Toolbar sx={{ gap: 1.5, minHeight: '72px !important' }}>
         <IconButton onClick={onMenuToggle} sx={{ display: { md: 'none' } }}>
           <MenuRoundedIcon />
@@ -100,7 +118,7 @@ export function TopBar({
             {page.title}
           </Typography>
           {page.subtitle && (
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: { xs: 'none', sm: 'block' } }}>
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: { xs: 'none', sm: 'block' }, mt: 0.25 }}>
               {page.subtitle}
             </Typography>
           )}
@@ -114,46 +132,64 @@ export function TopBar({
           sx={{ display: { xs: 'none', md: 'flex' } }}
         />
 
-        <IconButton onClick={(e) => setNotifEl(e.currentTarget)}>
-          <Badge badgeContent={notifLoading ? 0 : notifications.length} color="error">
-            <NotificationsRoundedIcon />
-          </Badge>
+        <IconButton onClick={(e) => setNotifEl(e.currentTarget)} aria-label="Notifications">
+          <motion.span
+            key={notifLoading ? 0 : notifications.length}
+            initial={{ scale: 0.85 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', bounce: 0.3, duration: 0.4 }}
+            style={{ display: 'inline-flex' }}
+          >
+            <Badge badgeContent={notifLoading ? 0 : notifications.length} color="error">
+              <NotificationsRoundedIcon />
+            </Badge>
+          </motion.span>
         </IconButton>
-        <Menu anchorEl={notifEl} open={!!notifEl} onClose={() => setNotifEl(null)} slotProps={{ paper: { sx: { width: 340, mt: 1 } } }}>
-          <Box sx={{ px: 2, py: 1.25 }}>
+        <Menu anchorEl={notifEl} open={!!notifEl} onClose={() => setNotifEl(null)} slotProps={{ paper: { sx: { width: 360, mt: 1 } } }}>
+          <Stack direction="row" sx={{ px: 2, py: 1.5, alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="subtitle2">Needs Attention</Typography>
-          </Box>
+            {!notifLoading && notifications.length > 0 && (
+              <Chip size="small" color="error" variant="outlined" label={`${notifications.length}`} sx={{ height: 20, minWidth: 20 }} />
+            )}
+          </Stack>
           <Divider />
           {notifLoading ? (
             <MenuItem disabled>Loading…</MenuItem>
           ) : notifications.length === 0 ? (
-            <MenuItem disabled>All clear — no flagged or low-confidence cases</MenuItem>
+            <Box sx={{ px: 3, py: 3, textAlign: 'center' }}>
+              <CheckCircleRoundedIcon sx={{ color: 'success.main', fontSize: 28, mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                All clear — no flagged or low-confidence cases
+              </Typography>
+            </Box>
           ) : (
-            notifications.map((n) => (
-              <MenuItem
-                key={n.id}
-                onClick={() => {
-                  setNotifEl(null);
-                  navigate(`/results/${n.scan_id}`);
-                }}
-                sx={{ whiteSpace: 'normal', alignItems: 'flex-start' }}
-              >
-                <ListItemIcon sx={{ mt: 0.25 }}>
-                  {n.is_flagged ? (
-                    <FlagRoundedIcon fontSize="small" color="info" />
-                  ) : (
-                    <WarningAmberRoundedIcon fontSize="small" color="warning" />
-                  )}
-                </ListItemIcon>
-                <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {n.predicted_class} · {Math.round(n.confidence * 100)}%
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {n.scan?.anonymized_patient_id ?? 'Unknown patient'}
-                  </Typography>
-                </Box>
-              </MenuItem>
+            notifications.map((n, idx) => (
+              <Box key={n.id}>
+                {idx > 0 && <Divider />}
+                <MenuItem
+                  onClick={() => {
+                    setNotifEl(null);
+                    navigate(`/results/${n.scan_id}`);
+                  }}
+                  sx={{ whiteSpace: 'normal', alignItems: 'flex-start', mx: 1, my: 0.5 }}
+                >
+                  <ListItemIcon sx={{ mt: 0.25 }}>
+                    {n.is_flagged ? (
+                      <FlagRoundedIcon fontSize="small" color="info" />
+                    ) : (
+                      <WarningAmberRoundedIcon fontSize="small" color="warning" />
+                    )}
+                  </ListItemIcon>
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {n.predicted_class} · {Math.round(n.confidence * 100)}%
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {n.scan?.anonymized_patient_id ?? 'Unknown patient'}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              </Box>
             ))
           )}
         </Menu>

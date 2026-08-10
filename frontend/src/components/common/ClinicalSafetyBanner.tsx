@@ -55,7 +55,7 @@ export function ClinicalSafetyBanner({
       icon={c.icon}
       variant="outlined"
       sx={{
-        borderRadius: 2,
+        borderRadius: 3,
         alignItems: 'flex-start',
         bgcolor: (theme) =>
           c.severity === 'error'
@@ -65,6 +65,11 @@ export function ClinicalSafetyBanner({
             : c.severity === 'success'
             ? theme.palette.success.light
             : theme.palette.info.light,
+        borderWidth: 1.5,
+        '& .MuiAlert-icon': {
+          mt: 0.15,
+          '& .MuiSvgIcon-root': { fontSize: 22 },
+        },
         '& .MuiAlert-message': { width: '100%' },
       }}
     >

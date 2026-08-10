@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { Box, Typography, LinearProgress, Stack, Divider } from '@mui/material';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
+import { motion, useSpring, useTransform } from 'motion/react';
 import { confidenceColor, confidenceSoftColor } from '../../theme';
 
 interface ConfidenceMeterProps {
@@ -8,6 +10,16 @@ interface ConfidenceMeterProps {
   showTable?: boolean;
   lowThreshold?: number;
   highThreshold?: number;
+}
+
+// Count-up percentage driven by a critically-damped spring (no overshoot)
+function AnimatedPercent({ value }: { value: number }) {
+  const spring = useSpring(0, { bounce: 0, duration: 0.8 });
+  const display = useTransform(spring, (v) => Math.round(v));
+  useEffect(() => {
+    spring.set(value);
+  }, [value, spring]);
+  return <motion.span style={{ fontVariantNumeric: 'tabular-nums' }}>{display}</motion.span>;
 }
 
 export function ConfidenceMeter({
@@ -40,8 +52,8 @@ export function ConfidenceMeter({
               {label}
             </Typography>
           </Stack>
-          <Typography variant="h3" sx={{ color, fontVariantNumeric: 'tabular-nums' }}>
-            {pct}%
+          <Typography variant="h3" sx={{ color }}>
+            <AnimatedPercent value={pct} />%
           </Typography>
         </Stack>
 
@@ -53,7 +65,11 @@ export function ConfidenceMeter({
               height: 10,
               borderRadius: 6,
               bgcolor: 'rgba(0,0,0,0.06)',
-              '& .MuiLinearProgress-bar': { bgcolor: color, borderRadius: 6 },
+              '& .MuiLinearProgress-bar': {
+                bgcolor: color,
+                borderRadius: 6,
+                transition: 'transform 600ms cubic-bezier(0.4, 0, 0.2, 1)',
+              },
             }}
           />
           <Box

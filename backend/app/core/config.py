@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     external_inference_api_key: Optional[str] = None
     use_external_inference: bool = False
 
+    # Production safety: when the trained CNN model file is missing or fails
+    # to load, the inference service FAILS LOUDLY (RuntimeError -> HTTP 500)
+    # instead of silently serving hand-written heuristic guesses. Set to true
+    # ONLY for demos/dev where the deterministic baseline engine is acceptable.
+    allow_heuristic_fallback: bool = False
+
     low_confidence_threshold: float = 0.7
     high_risk_threshold: float = 0.9
 

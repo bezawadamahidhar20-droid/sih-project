@@ -111,6 +111,10 @@ class AuditLogger:
         file_size: int,
         mime_type: str
     ) -> None:
+        # NOTE: the extra key is ``file_name``, NOT ``filename`` — ``filename``
+        # is a reserved LogRecord attribute and passing it in ``extra`` makes
+        # Python's logging raise KeyError (strict since 3.14), which would
+        # break every upload endpoint call.
         self.logger.info(
             "file_uploaded",
             extra={
@@ -118,7 +122,7 @@ class AuditLogger:
                 "user_id": user_id,
                 "user_role": user_role,
                 "file_hash": file_hash,
-                "filename": filename,
+                "file_name": filename,
                 "file_size": file_size,
                 "mime_type": mime_type,
             }

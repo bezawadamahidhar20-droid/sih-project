@@ -22,6 +22,8 @@ async def health_check():
         model_loaded=model_service.is_model_loaded,
         engine=model_service.engine,
         device=model_service.device,
+        model_path=settings.model_path,
+        heuristic_fallback_active=model_service.heuristic_fallback_active,
     )
 
 

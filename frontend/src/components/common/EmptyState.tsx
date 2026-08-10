@@ -1,4 +1,5 @@
 import { Box, Typography, SvgIconProps } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { ReactNode } from 'react';
 
 interface EmptyStateProps {
@@ -23,17 +24,20 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
     >
       <Box
         sx={{
-          width: 64,
-          height: 64,
-          borderRadius: '18px',
-          bgcolor: 'grey.100',
+          width: 68,
+          height: 68,
+          borderRadius: '20px',
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.08),
+          border: '1px dashed',
+          borderColor: (t) => alpha(t.palette.primary.main, 0.28),
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           mb: 2.5,
+          transition: 'transform .2s ease',
         }}
       >
-        <Icon sx={{ fontSize: 30, color: 'grey.500' }} />
+        <Icon sx={{ fontSize: 30, color: (t) => alpha(t.palette.primary.main, 0.7) }} />
       </Box>
       <Typography variant="subtitle1" color="text.primary">
         {title}

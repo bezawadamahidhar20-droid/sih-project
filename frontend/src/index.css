@@ -1,7 +1,11 @@
-/* Base font */
+/* Base font — Figtree for headings, Noto Sans for body (ui-ux-pro-max pairing) */
 :root {
-  font-family: 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-family: 'Noto Sans', 'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 html,
@@ -14,6 +18,22 @@ body {
   margin: 0;
 }
 
+/* Subtle brand-tinted canvas: keeps the clinical calm, adds a hint of depth */
+body {
+  background-color: #f4f7f9;
+  background-image:
+    radial-gradient(1200px 600px at 85% -10%, rgba(15, 92, 140, 0.05), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(15, 156, 143, 0.05), transparent 60%);
+  /* scroll (not fixed) — fixed repaints on scroll on iOS and hurts performance */
+  background-attachment: scroll;
+}
+
+/* Text selection in brand color */
+::selection {
+  background-color: rgba(15, 92, 140, 0.18);
+  color: #0a3f60;
+}
+
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
@@ -21,18 +41,22 @@ html {
 
 /* Consistent scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c7d2d9;
+  background: #c3cfd7;
   border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #a7b8c3;
+  background-clip: content-box;
+  border: 2px solid transparent;
 }
 
 /* Print: hide navigation chrome */
@@ -40,5 +64,40 @@ html {
   nav,
   header {
     display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}
+
+/* Respect reduced-motion preferences globally */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Reduced transparency: make frosted surfaces solid (Apple design guidance) */
+@media (prefers-reduced-transparency: reduce) {
+  .MuiPaper-root,
+  .MuiAppBar-root {
+    background-color: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* High contrast: crisper borders on surfaces */
+@media (prefers-contrast: more) {
+  body {
+    background-color: #ffffff;
+  }
+  .MuiPaper-root {
+    border-color: #b8c6cf !important;
   }
 }

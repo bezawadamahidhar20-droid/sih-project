@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   Box,
   Grid,
@@ -12,6 +13,8 @@ import {
   Divider,
 } from '@mui/material';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
+import { alpha } from '@mui/material/styles';
+
 import PendingActionsRoundedIcon from '@mui/icons-material/PendingActionsRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
@@ -24,6 +27,8 @@ import { StatusChip, ConfidenceBadge, FindingChip } from '../components/common/S
 import { EmptyState } from '../components/common/EmptyState';
 import { StatCardSkeleton } from '../components/common/Skeletons';
 import { ClinicalSafetyBanner } from '../components/common/ClinicalSafetyBanner';
+import { CountUp } from '../components/common/CountUp';
+import { SplitText } from '../components/common/SplitText';
 
 function timeAgo(dateStr: string) {
   const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -66,6 +71,8 @@ export function DashboardPage() {
     };
   }, []);
 
+  const prefersReducedMotion = useReducedMotion();
+
   const displayName = user?.full_name?.split(' ')[0] || user?.username || 'Doctor';
   const totalScans = scans.length;
   const pendingScans = scans.filter((s) => s.status === 'processing' || s.status === 'uploaded').length;
@@ -81,17 +88,28 @@ export function DashboardPage() {
     .slice(0, 5);
 
   const kpis = [
-    { label: 'Total Scans', value: totalScans, icon: DescriptionRoundedIcon, color: 'primary.main' },
-    { label: 'Pending Analysis', value: pendingScans, icon: PendingActionsRoundedIcon, color: 'warning.main' },
-    { label: 'Flagged Cases', value: flaggedPredictions, icon: FlagRoundedIcon, color: 'info.main' },
-    { label: 'Low Confidence', value: lowConfidence, icon: WarningAmberRoundedIcon, color: 'error.main' },
+    { label: 'Total Scans', value: totalScans, icon: DescriptionRoundedIcon, color: '#0f5c8c' },
+    { label: 'Pending Analysis', value: pendingScans, icon: PendingActionsRoundedIcon, color: '#b7791f' },
+    { label: 'Flagged Cases', value: flaggedPredictions, icon: FlagRoundedIcon, color: '#2f6fa8' },
+    { label: 'Low Confidence', value: lowConfidence, icon: WarningAmberRoundedIcon, color: '#c0362c' },
   ];
 
   return (
     <Stack spacing={3.5}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}>
         <Box>
-          <Typography variant="h2">{getGreeting(displayName)}</Typography>
+          <Typography variant="h2" component="div">
+            <SplitText
+              text={getGreeting(displayName)}
+              splitType="words"
+              tag="span"
+              delay={35}
+              duration={0.7}
+              from={{ opacity: 0, y: 12 }}
+              to={{ opacity: 1, y: 0 }}
+              textAlign="left"
+            />
+          </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             Here's your diagnostic workspace for today.
           </Typography>
@@ -110,19 +128,42 @@ export function DashboardPage() {
                 <StatCardSkeleton />
               </Grid>
             ))
-          : kpis.map((kpi) => (
+          : kpis.map((kpi, idx) => (
               <Grid key={kpi.label} size={{ xs: 6, md: 3 }}>
-                <Card sx={{ p: 2.5, borderRadius: 3, height: '100%' }}>
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    type: 'spring',
+                    bounce: 0,
+                    duration: 0.45,
+                    // No stagger delay for reduced-motion users — instant fade
+                    delay: prefersReducedMotion ? 0 : idx * 0.06,
+                  }}
+                  style={{ height: '100%' }}
+                >
+                <Card
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 3,
+                    height: '100%',
+                    '&:hover': {
+                      boxShadow: '0 14px 28px -10px rgba(15,36,48,0.18)',
+                      transform: 'translateY(-2px)',
+                    },
+                  }}
+                >
                   <Box
                     sx={{
                       width: 42,
                       height: 42,
                       borderRadius: 2,
-                      bgcolor: 'grey.100',
+                      bgcolor: alpha(kpi.color, 0.1),
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       mb: 1.75,
+                      transition: 'transform .2s ease',
                     }}
                   >
                     <kpi.icon sx={{ color: kpi.color, fontSize: 22 }} />
@@ -130,10 +171,11 @@ export function DashboardPage() {
                   <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.4 }}>
                     {kpi.label}
                   </Typography>
-                  <Typography variant="h2" sx={{ mt: 0.25 }}>
-                    {kpi.value}
+                  <Typography variant="h2" sx={{ mt: 0.25, fontVariantNumeric: 'tabular-nums' }}>
+                    <CountUp to={kpi.value} duration={1.4} />
                   </Typography>
                 </Card>
+                </motion.div>
               </Grid>
             ))}
       </Grid>
@@ -149,9 +191,10 @@ export function DashboardPage() {
             alignItems: 'center',
             gap: 2,
             bgcolor: 'warning.light',
-            border: '1px solid',
-            borderColor: 'warning.main',
-            '&:hover': { boxShadow: 3 },
+            border: '1.5px solid',
+            borderColor: (t) => alpha(t.palette.warning.main, 0.5),
+            transition: 'box-shadow .2s ease, transform .2s ease',
+            '&:hover': { boxShadow: '0 14px 28px -10px rgba(183,121,31,0.3)', transform: 'translateY(-2px)' },
           }}
         >
           <WarningAmberRoundedIcon color="warning" sx={{ fontSize: 28 }} />

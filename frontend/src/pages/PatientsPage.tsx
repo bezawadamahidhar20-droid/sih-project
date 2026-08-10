@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Card, Typography, Stack, TextField, InputAdornment, Grid, Chip, Avatar } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import GroupRoundedIcon from '@mui/icons-material/GroupRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
@@ -108,11 +109,30 @@ export function PatientsPage() {
             {filtered.map((patient) => (
               <Grid key={patient.patientId} size={{ xs: 12, sm: 6, md: 4 }}>
                 <Card
-                  sx={{ p: 2.5, borderRadius: 3, cursor: 'pointer', '&:hover': { boxShadow: 4 } }}
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 3,
+                    cursor: 'pointer',
+                    transition: 'box-shadow .2s, transform .2s, border-color .2s',
+                    '&:hover': {
+                      boxShadow: '0 14px 28px -10px rgba(15,36,48,0.18)',
+                      transform: 'translateY(-2px)',
+                      borderColor: 'primary.light',
+                    },
+                  }}
                   onClick={() => navigate(`/patients/${patient.patientId}`)}
                 >
                   <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-                    <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 700 }}>{patient.patientId.slice(-2)}</Avatar>
+                    <Avatar
+                      sx={{
+                        bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
+                        color: 'primary.dark',
+                        fontWeight: 700,
+                        fontSize: 14,
+                      }}
+                    >
+                      {patient.patientId.slice(-2)}
+                    </Avatar>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography variant="subtitle1" noWrap>{patient.patientId}</Typography>
                       <Typography variant="caption" color="text.secondary">

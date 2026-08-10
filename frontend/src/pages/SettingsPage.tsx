@@ -97,7 +97,11 @@ export function SettingsPage() {
       </Box>
 
       <Card sx={{ borderRadius: 3 }}>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Tabs
+          value={tab}
+          onChange={(_, v) => setTab(v)}
+          sx={{ px: 2, borderBottom: '1px solid', borderColor: 'divider', '& .MuiTabs-flexContainer': { flexWrap: { xs: 'wrap', sm: 'nowrap' } } }}
+        >
           <Tab icon={<PersonRoundedIcon fontSize="small" />} iconPosition="start" label="Account" />
           <Tab icon={<ShieldRoundedIcon fontSize="small" />} iconPosition="start" label="Security" />
           <Tab icon={<MemoryRoundedIcon fontSize="small" />} iconPosition="start" label="AI Engine" />

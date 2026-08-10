@@ -24,6 +24,7 @@ import VerifiedUserRoundedIcon from '@mui/icons-material/VerifiedUserRounded';
 import PsychologyRoundedIcon from '@mui/icons-material/PsychologyRounded';
 import ManageSearchRoundedIcon from '@mui/icons-material/ManageSearchRounded';
 import MonitorHeartRoundedIcon from '@mui/icons-material/MonitorHeartRounded';
+import { ShinyText } from '../components/common/ShinyText';
 import { useAuth } from '../context/AuthContext';
 
 const FEATURES = [
@@ -107,6 +108,18 @@ export function LoginPage() {
             opacity: 0.22,
           }}
         />
+        {/* Subtle grid pattern for depth */}
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px)',
+            backgroundSize: '44px 44px',
+            maskImage: 'radial-gradient(ellipse 90% 80% at 30% 20%, black 30%, transparent 75%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 90% 80% at 30% 20%, black 30%, transparent 75%)',
+          }}
+        />
         <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', position: 'relative' }}>
           <Box sx={{ width: 44, height: 44, borderRadius: 2.5, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <LocalHospitalRoundedIcon sx={{ color: '#fff' }} />
@@ -124,8 +137,8 @@ export function LoginPage() {
               label="AI-Assisted Diagnostics"
               sx={{ alignSelf: 'flex-start', bgcolor: 'rgba(61,128,168,0.2)', color: '#8fc4e6', border: '1px solid rgba(61,128,168,0.4)' }}
             />
-            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 34, lineHeight: 1.2 }}>
-              Clinical-grade AI for medical imaging
+            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 34, lineHeight: 1.2, fontFamily: 'Figtree, sans-serif', letterSpacing: '-0.02em' }}>
+              <ShinyText text="Clinical-grade AI for medical imaging" speed={4} color="#d5e4ee" shineColor="#ffffff" pauseOnHover />
             </Typography>
             <Typography sx={{ color: '#93a9ba', fontSize: 15, maxWidth: 420, lineHeight: 1.7 }}>
               Upload chest X-rays and CT scans. Receive AI-powered diagnostic support with Grad-CAM
@@ -194,7 +207,14 @@ export function LoginPage() {
             Access your clinical diagnostic workspace
           </Typography>
 
-          <Paper variant="outlined" sx={{ p: 3.5, borderRadius: 3 }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 3.5,
+              borderRadius: 3,
+              boxShadow: '0 4px 12px rgba(15,36,48,0.06), 0 18px 40px -12px rgba(15,36,48,0.12)',
+            }}
+          >
             <form onSubmit={handleSubmit}>
               <Stack spacing={2.5}>
                 {error && <Alert severity="error">{error}</Alert>}

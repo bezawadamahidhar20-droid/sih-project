@@ -1,21 +1,23 @@
-"""Model inference service with two interchangeable engines.
+"""Model inference service.
 
-* **CNN + Grad-CAM engine** — used when a trained model file exists at
-  ``settings.model_path`` (a state dict for the architecture named by
-  ``settings.model_architecture``). PyTorch / TorchVision are imported lazily
-  so the application can boot and run its test-suite without them installed.
+* **CNN + Grad-CAM engine (production)** — used when a trained model file
+  exists at ``settings.model_path`` (a state dict for the architecture
+  named by ``settings.model_architecture``). PyTorch / TorchVision are
+  imported lazily so the application can boot and run its test-suite
+  without them installed. Grad-CAM is generated from real CNN gradients and
+  activations via forward/backward hooks on ``settings.gradcam_target_layer``.
 
-* **Baseline heuristic engine** — a deterministic image-statistics classifier
-  with a saliency heatmap, used when no trained model is present. It is
-  *not* a clinical-grade detector; it exists so the full
-  upload → predict → heatmap loop is functional out of the box and can be
-  swapped for a trained model without any code changes.
+* **Baseline heuristic engine (dev-only, opt-in)** — a deterministic
+  image-statistics classifier with a saliency heatmap. It is NOT a
+  clinical-grade detector and is NEVER used in production: it only activates
+  when ``ALLOW_HEURISTIC_FALLBACK=true`` and no trained model is present.
+  With the flag off (the default), a missing/failed model makes
+  ``predict_with_gradcam`` raise, so the API surfaces a clear 500 instead of
+  silently serving guessed diagnoses.
 
-Both engines expose the same API
+The engine exposes one API
 (``ModelService.predict_with_gradcam(preprocessed: np.ndarray)``) so the
-routes are engine-agnostic. Swap strategy is also trivial: point
-``EXTERNAL_INFERENCE_URL`` at a cloud GPU endpoint later without touching
-callers.
+routes stay engine-agnostic.
 """
 
 import logging
@@ -176,13 +178,21 @@ class ModelService:
                 self._device = "cpu"
                 self._engine = HEURISTIC_ENGINE
 
+        self._heuristic_active = self._model is None and settings.allow_heuristic_fallback
         if self._model is None:
-            logger.warning(
-                "No trained model found at '%s' — using '%s' engine. "
-                "Drop a state-dict at that path to enable CNN + Grad-CAM.",
-                settings.model_path,
-                HEURISTIC_ENGINE,
-            )
+            if settings.allow_heuristic_fallback:
+                logger.warning(
+                    "No trained model found at '%s' and ALLOW_HEURISTIC_FALLBACK=true — "
+                    "using '%s' engine. This is a DEV-ONLY baseline, never clinical-grade.",
+                    settings.model_path,
+                    HEURISTIC_ENGINE,
+                )
+            else:
+                logger.error(
+                    "No trained model found at '%s' and heuristic fallback is disabled — "
+                    "prediction requests will FAIL (no heuristic guesses served).",
+                    settings.model_path,
+                )
 
     def _load_cnn(self, model_path: Path) -> None:
         import torch
@@ -216,6 +226,11 @@ class ModelService:
     def device(self) -> str:
         return str(self._device)
 
+    @property
+    def heuristic_fallback_active(self) -> bool:
+        """True only when the dev-only heuristic engine is serving predictions."""
+        return self._heuristic_active
+
     def predict_with_gradcam(self, input_np: np.ndarray) -> Dict[str, Any]:
         """Run inference + explainability heatmap on a preprocessed batch.
 
@@ -229,7 +244,13 @@ class ModelService:
         with self._inference_lock:
             if self._model is not None:
                 return self._predict_cnn(input_np)
-            return self._predict_heuristic(input_np)
+            if settings.allow_heuristic_fallback:
+                return self._predict_heuristic(input_np)
+            raise RuntimeError(
+                "CNN model is not loaded (missing or failed at '"
+                f"{settings.model_path}') and heuristic fallback is disabled. "
+                "No prediction served."
+            )
 
     # ------------------------------------------------------- CNN path
     def _predict_cnn(self, input_np: np.ndarray) -> Dict[str, Any]:

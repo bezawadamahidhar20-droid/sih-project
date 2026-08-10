@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Box, Typography } from '@mui/material';
+import { AnimatePresence, motion } from 'motion/react';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import { Sidebar, SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -79,8 +80,24 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Typography>
           </Box>
         )}
-        <Box component="main" sx={{ flex: 1, p: { xs: 2, sm: 3, md: 4 }, maxWidth: 1600, width: '100%', mx: 'auto' }}>
-          {children}
+        <Box
+          component="main"
+          sx={{ flex: 1, p: { xs: 2, sm: 3, md: 4 }, maxWidth: 1600, width: '100%', mx: 'auto' }}
+        >
+          {/* Critically-damped spring page transition (damping 1.0, no bounce).
+              popLayout mounts the next page immediately and floats the exiting
+              one out — no blank gap while waiting for exit. */}
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4, transition: { duration: 0.12 } }}
+              transition={{ type: 'spring', bounce: 0, duration: 0.38 }}
+            >
+              {children}
+            </motion.div>
+          </AnimatePresence>
         </Box>
       </Box>
     </Box>

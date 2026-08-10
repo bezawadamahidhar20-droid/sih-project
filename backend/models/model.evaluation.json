@@ -1,0 +1,63 @@
+{
+  "engine": "resnet50",
+  "num_samples": 624,
+  "class_names": [
+    "NORMAL",
+    "PNEUMONIA"
+  ],
+  "positive_class": "PNEUMONIA",
+  "metrics": {
+    "accuracy": 0.842948717948718,
+    "balanced_accuracy": 0.8008547008547009,
+    "precision": 0.8146551724137931,
+    "sensitivity": 0.9692307692307692,
+    "recall": 0.9692307692307692,
+    "specificity": 0.6324786324786325,
+    "f1": 0.8852459016393442,
+    "auc": 0.9446635985097542,
+    "true_positive": 378,
+    "false_negative": 12,
+    "false_positive": 86,
+    "true_negative": 148,
+    "support": 624
+  },
+  "per_class": {
+    "NORMAL": {
+      "precision": 0.925,
+      "recall": 0.6324786324786325,
+      "f1": 0.751269035532995,
+      "support": 234
+    },
+    "PNEUMONIA": {
+      "precision": 0.8146551724137931,
+      "recall": 0.9692307692307692,
+      "f1": 0.8852459016393442,
+      "support": 390
+    },
+    "macro_avg": {
+      "precision": 0.8698275862068966,
+      "recall": 0.8008547008547009,
+      "f1": 0.8182574685861697
+    }
+  },
+  "confusion_matrix": {
+    "true_class": [
+      "NORMAL",
+      "PNEUMONIA"
+    ],
+    "predicted_class": [
+      "NORMAL",
+      "PNEUMONIA"
+    ],
+    "matrix": [
+      [
+        148,
+        86
+      ],
+      [
+        12,
+        378
+      ]
+    ]
+  }
+}

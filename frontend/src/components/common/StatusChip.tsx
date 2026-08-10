@@ -1,4 +1,5 @@
 import { Chip, ChipProps, Box, Typography } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
 import HourglassBottomRoundedIcon from '@mui/icons-material/HourglassBottomRounded';
 import ErrorRoundedIcon from '@mui/icons-material/ErrorRounded';
@@ -65,7 +66,8 @@ export function StatusChip({
         bgcolor: config.bg,
         color: config.color,
         '& .MuiChip-icon': { color: config.color, ml: '6px' },
-        border: '1px solid transparent',
+        border: `1px solid ${alpha(config.color, 0.18)}`,
+        fontWeight: 600,
       }}
     />
   );
@@ -92,7 +94,7 @@ export function ConfidenceBadge({
     <Chip
       size={size}
       label={`${pct}% confidence`}
-      sx={{ bgcolor: bg, color, fontVariantNumeric: 'tabular-nums' }}
+      sx={{ bgcolor: bg, color, fontVariantNumeric: 'tabular-nums', border: `1px solid ${alpha(color, 0.18)}`, fontWeight: 600 }}
     />
   );
 }

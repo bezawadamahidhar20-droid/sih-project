@@ -189,14 +189,17 @@ export function HistoryPage() {
                   borderRadius: 3,
                   overflow: 'hidden',
                   cursor: 'pointer',
-                  transition: 'box-shadow .15s, transform .15s',
-                  '&:hover': { boxShadow: 4, transform: 'translateY(-2px)' },
-                  border: p.is_flagged ? '1px solid' : undefined,
+                  transition: 'box-shadow .2s, transform .2s',
+                  '&:hover': {
+                    boxShadow: '0 14px 28px -10px rgba(15,36,48,0.2)',
+                    transform: 'translateY(-3px)',
+                  },
+                  border: p.is_flagged ? '1.5px solid' : undefined,
                   borderColor: p.is_flagged ? 'info.main' : undefined,
                 }}
                 onClick={() => navigate(`/results/${p.scan_id}`)}
               >
-                <Box sx={{ height: 140, bgcolor: '#0b1620' }}>
+                <Box sx={{ height: 140, bgcolor: '#0b1620', backgroundImage: 'linear-gradient(135deg, #0b1620 0%, #12283a 100%)' }}>
                   <AuthImage src={p.gradcam_url ?? undefined} alt={p.predicted_class} objectFit="cover" />
                 </Box>
                 <Box sx={{ p: 2 }}>

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { SnackbarProvider } from 'notistack';
+import { MotionConfig } from 'motion/react';
 import { theme } from './theme';
 import { AuthProvider } from './context/AuthContext';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -19,6 +20,8 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      {/* Apple-style motion: springs everywhere, but honor prefers-reduced-motion */}
+      <MotionConfig reducedMotion="user">
       <SnackbarProvider maxSnack={4} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} autoHideDuration={3500}>
         <AuthProvider>
           <BrowserRouter>
@@ -38,6 +41,7 @@ export default function App() {
           </BrowserRouter>
         </AuthProvider>
       </SnackbarProvider>
+      </MotionConfig>
     </ThemeProvider>
   );
 }

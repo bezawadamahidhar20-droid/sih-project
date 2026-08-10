@@ -87,13 +87,20 @@ export function PatientHistoryPage() {
                 <ResponsiveContainer>
                   <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e9ee" />
-                    <XAxis dataKey="date" fontSize={12} stroke="#84979f" />
-                    <YAxis domain={[0, 100]} fontSize={12} stroke="#84979f" />
+                    <XAxis dataKey="date" fontSize={12} stroke="#84979f" tickLine={false} axisLine={false} />
+                    <YAxis domain={[0, 100]} fontSize={12} stroke="#84979f" tickLine={false} axisLine={false} />
                     <ChartTooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: '1px solid #e2e9ee',
+                        boxShadow: '0 8px 24px rgba(15,36,48,0.12)',
+                        fontSize: 12.5,
+                        fontFamily: 'inherit',
+                      }}
                       formatter={(value: any, _name, item: any) => [`${value}% (${item.payload.finding})`, 'Confidence']}
                     />
-                    <ReferenceLine y={70} stroke="#b7791f" strokeDasharray="4 4" />
-                    <Line type="monotone" dataKey="confidence" stroke="#0f5c8c" strokeWidth={2.5} dot={{ r: 4 }} />
+                    <ReferenceLine y={70} stroke="#b7791f" strokeDasharray="4 4" label={{ value: '70% threshold', fontSize: 11, fill: '#8a5a14', position: 'insideBottomRight' }} />
+                    <Line type="monotone" dataKey="confidence" stroke="#0f5c8c" strokeWidth={2.5} dot={{ r: 4, fill: '#0f5c8c', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </Box>

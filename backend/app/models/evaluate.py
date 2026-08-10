@@ -33,7 +33,9 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--model", type=str, default=None,
-                   help="Path to a trained state dict. Omit to evaluate the baseline heuristic engine.")
+                   help="Path to a trained state dict. Omit to evaluate the CNN already "
+                        "loaded by the model service (requires a loaded model — the "
+                        "dev-only heuristic engine is not an evaluation target).")
     p.add_argument("--data-dir", type=str, default=None,
                    help="Folder layout: <data-dir>/test/<class>/*.img")
     p.add_argument("--csv", type=str, default=None,
@@ -73,27 +75,35 @@ def _run_eval(args, device):
     from app.models.data import build_dataset, default_transforms
     from app.models.metrics import binary_metrics, multiclass_report, format_report
 
-    # ---- load model (or fall back to the service's engine) ----
-    model, target_layer, engine = None, None, "baseline-heuristic"
+    # ---- load model (or use the CNN already loaded by the service) ----
+    model, target_layer, engine = None, None, None
     if args.model:
         model, target_layer = _load_model(args, device)
         engine = args.arch
     else:
         from app.services.model_inference import get_model_service
         model_service = get_model_service()
-        engine = model_service.engine
         if model_service.is_model_loaded:
+            model, target_layer = None, None  # use the service's loaded CNN below
+            engine = model_service.engine
             print("[eval] No --model given; using the CNN already loaded by the service.")
+        elif model_service.heuristic_fallback_active:
+            engine = model_service.engine
+            print("[eval] WARNING: evaluating the DEV-ONLY baseline heuristic engine "
+                  "(ALLOW_HEURISTIC_FALLBACK=true). Metrics are NOT clinical-grade.")
         else:
-            print("[eval] No --model given and no CNN loaded — using baseline heuristic engine.")
+            raise SystemExit(
+                "No --model given and no CNN is loaded. Heuristic fallback is "
+                "disabled in production and is not an evaluation target — pass "
+                "--model <trained state dict>."
+            )
 
     # ---- load test set ----
     if args.data_dir:
         test_ds = build_dataset(
             root=str(Path(args.data_dir) / "test"),
-            # Only the CNN path needs tensor transforms; the heuristic path
-            # loads raw files itself, so keep the dataset torch-free when
-            # no model is being evaluated.
+            # Only the batched CNN path needs tensor transforms; the
+            # per-file service path preprocesses raw images itself.
             transform=default_transforms(args.input_size, train=False) if model is not None else None,
         )
     elif args.csv:
@@ -132,9 +142,9 @@ def _run_eval(args, device):
                 all_probs.append(probs)
                 all_labels.extend(labels.numpy().tolist())
     else:
-        # Heuristic engine path: preprocess each image exactly like the API.
-        # No torch/torchvision required — we iterate raw file paths and reuse
-        # the same dataset discovery (class ordering) as the CNN path.
+        # Service path (CNN loaded by the service, or explicit dev-only
+        # heuristic): preprocess each image exactly like the API route and
+        # reuse the same dataset discovery (class ordering) as the CNN path.
         from PIL import Image
 
         from app.services.image_processing import preprocess_image

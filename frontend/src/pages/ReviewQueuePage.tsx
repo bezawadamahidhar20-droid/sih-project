@@ -88,7 +88,7 @@ export function ReviewQueuePage() {
                 key={p.id}
                 direction={{ xs: 'column', sm: 'row' }}
                 spacing={2}
-                sx={{ p: 2.5, alignItems: { sm: 'center' } }}
+                sx={{ p: 2.5, alignItems: { sm: 'center' }, transition: 'background-color .15s', '&:hover': { bgcolor: 'grey.50' } }}
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>

@@ -15,9 +15,13 @@ frontend/dist/
 # Runtime data (never commit scans, encrypted files, or DBs)
 backend/uploads/
 backend/logs/
-backend/models/*.pth
 *.db
 *.sqlite3
+
+# Trained CNN checkpoint — committed intentionally. The API requires it
+# (fails loudly without the model), so it ships with the repo.
+# (Removed the old `backend/models/*.pth` rule so the model + summaries
+# are tracked. Future retrained checkpoints will also be tracked.)
 
 # Training data (large datasets — never commit)
 backend/data/
@@ -31,6 +35,11 @@ backend_out.log
 .pytest_cache/
 .vite/
 .eslintcache
+
+# Agent/editor tooling (keep out of the repo)
+.agents/
+.claude/
+skills-lock.json
 
 # OS
 .DS_Store

@@ -1,8 +1,9 @@
 """End-to-end tests for the upload -> predict -> heatmap loop.
 
-The tests accept either inference engine: the ``baseline-heuristic`` fallback
-(used when no trained model file is present) or the ``resnet50`` CNN engine
-(used when a trained state dict exists at ``MODEL_PATH``).
+These run against whatever engine the model service loaded. Production ships
+with a trained CNN at ``MODEL_PATH``, so the suite exercises the real
+``resnet50`` engine; the dev-only heuristic engine is never an evaluation
+target (see ``test_model_service.py``).
 """
 
 import io

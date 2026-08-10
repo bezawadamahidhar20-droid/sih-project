@@ -171,3 +171,5 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     engine: str
     device: str
+    model_path: str
+    heuristic_fallback_active: bool

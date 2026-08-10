@@ -104,7 +104,12 @@ export function AuditLogsPage() {
             {entries.map((entry) => {
               const config = typeConfig[entry.type];
               return (
-                <Stack key={entry.id} direction="row" spacing={2} sx={{ alignItems: 'flex-start', p: 2.25 }}>
+                <Stack
+                  key={entry.id}
+                  direction="row"
+                  spacing={2}
+                  sx={{ alignItems: 'flex-start', p: 2.25, transition: 'background-color .15s', '&:hover': { bgcolor: 'grey.50' } }}
+                >
                   <Box
                     sx={{
                       width: 34,
@@ -115,6 +120,7 @@ export function AuditLogsPage() {
                       alignItems: 'center',
                       justifyContent: 'center',
                       flexShrink: 0,
+                      boxShadow: `0 2px 6px ${config.color}22`,
                     }}
                   >
                     <config.icon sx={{ fontSize: 17, color: config.color }} />

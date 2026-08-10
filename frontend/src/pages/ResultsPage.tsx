@@ -25,6 +25,7 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
 import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded';
+import { alpha } from '@mui/material/styles';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PredictResponse, Scan } from '../types';
@@ -188,14 +189,44 @@ export function ResultsPage() {
             {/* AI result panel */}
             <Grid size={{ xs: 12, lg: 5 }}>
               <Stack spacing={2.5}>
-                <Card sx={{ p: 3, borderRadius: 3 }}>
+                <Card
+                  sx={{
+                    p: 3,
+                    borderRadius: 3,
+                    position: 'relative',
+                    overflow: 'hidden',
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: 4,
+                      background: 'linear-gradient(90deg, #0f5c8c 0%, #0f9c8f 100%)',
+                    },
+                  }}
+                >
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <PsychologyRoundedIcon color="primary" />
-                    <Typography variant="h5">AI Analysis</Typography>
+                    <Box
+                      sx={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 2,
+                        bgcolor: (t) => alpha(t.palette.primary.main, 0.1),
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <PsychologyRoundedIcon sx={{ color: 'primary.main', fontSize: 20 }} />
+                    </Box>
+                    <Box>
+                      <Typography variant="h5">AI Analysis</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Decision-support result
+                      </Typography>
+                    </Box>
                   </Stack>
-                  <Typography variant="caption" color="text.secondary">
-                    Decision-support result
-                  </Typography>
 
                   <Box sx={{ mt: 2.5 }}>
                     <Typography variant="overline" color="text.secondary">AI-Assisted Finding</Typography>

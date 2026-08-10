@@ -190,22 +190,25 @@ export function UploadDropzone({ onUploaded, onError, defaultPatientId = '' }: U
         <input {...getInputProps()} />
         <Box
           sx={{
-            width: 64,
-            height: 64,
+            width: 68,
+            height: 68,
             mx: 'auto',
             mb: 2,
             borderRadius: 3,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: isDragActive ? 'primary.light' : 'background.paper',
+            bgcolor: isDragActive ? 'primary.main' : 'background.paper',
             border: '1px solid',
-            borderColor: 'divider',
+            borderColor: isDragActive ? 'primary.main' : 'divider',
+            boxShadow: isDragActive ? '0 8px 24px rgba(15,92,140,0.25)' : 'none',
+            transition: 'all .2s ease',
+            transform: isDragActive ? 'translateY(-2px) scale(1.04)' : 'none',
           }}
         >
-          <CloudUploadRoundedIcon sx={{ fontSize: 32, color: isDragActive ? 'primary.main' : 'grey.500' }} />
+          <CloudUploadRoundedIcon sx={{ fontSize: 34, color: isDragActive ? '#fff' : 'primary.main' }} />
         </Box>
-        <Typography variant="subtitle1">
+        <Typography variant="subtitle1" sx={{ fontFamily: 'Figtree, sans-serif' }}>
           {isDragActive ? 'Drop medical images here' : 'Drag & drop medical images here'}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>

@@ -86,6 +86,7 @@ export function Sidebar({
         display: 'flex',
         flexDirection: 'column',
         bgcolor: '#0b2338',
+        backgroundImage: 'linear-gradient(180deg, rgba(15,92,140,0.18) 0%, rgba(11,35,56,0) 32%)',
         color: '#cfe0ea',
         transition: 'width .25s',
         overflow: 'hidden',
@@ -109,6 +110,8 @@ export function Sidebar({
             height: 38,
             borderRadius: 2,
             bgcolor: 'primary.main',
+            backgroundImage: 'linear-gradient(135deg, #3d80a8 0%, #0a3f60 100%)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -119,7 +122,7 @@ export function Sidebar({
         </Box>
         {!(collapsed && variant === 'permanent') && (
           <Box sx={{ overflow: 'hidden' }}>
-            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 15, lineHeight: 1.2 }} noWrap>
+            <Typography sx={{ color: '#fff', fontWeight: 700, fontSize: 15, lineHeight: 1.2, fontFamily: 'Figtree, sans-serif' }} noWrap>
               MediScan AI
             </Typography>
             <Typography sx={{ color: '#7d93a3', fontSize: 11 }} noWrap>
@@ -145,17 +148,33 @@ export function Sidebar({
               end={item.to === '/'}
               onClick={onClose}
               sx={{
+                position: 'relative',
                 borderRadius: 2,
                 mb: 0.5,
                 minHeight: 42,
                 justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start',
                 color: '#a9bece',
+                transition: 'background-color .18s, color .18s',
+                // Active indicator bar
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  left: 0,
+                  top: '50%',
+                  transform: 'translateY(-50%) scaleY(0)',
+                  width: 3,
+                  height: 22,
+                  borderRadius: '0 3px 3px 0',
+                  bgcolor: '#6fb3e0',
+                  transition: 'transform .2s',
+                },
                 '&.active': {
                   bgcolor: 'rgba(61,128,168,0.25)',
                   color: '#fff',
+                  '&::before': { transform: 'translateY(-50%) scaleY(1)' },
                   '& .MuiListItemIcon-root': { color: '#6fb3e0' },
                 },
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.07)', color: '#e6f1f7' },
               }}
             >
               <ListItemIcon
@@ -192,7 +211,24 @@ export function Sidebar({
           spacing={1}
           sx={{ alignItems: 'center', justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start' }}
         >
-          <CircleIcon sx={{ fontSize: 9, color: aiOnline ? '#3ddc84' : '#e0574b' }} />
+          <Box sx={{ position: 'relative', display: 'flex' }}>
+            <CircleIcon sx={{ fontSize: 9, color: aiOnline ? '#3ddc84' : '#e0574b' }} />
+            {aiOnline && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: -3,
+                  borderRadius: '50%',
+                  border: '1.5px solid rgba(61,220,132,0.55)',
+                  animation: 'pulse 2s ease-out infinite',
+                  '@keyframes pulse': {
+                    '0%': { transform: 'scale(0.6)', opacity: 0.9 },
+                    '100%': { transform: 'scale(1.6)', opacity: 0 },
+                  },
+                }}
+              />
+            )}
+          </Box>
           {!(collapsed && variant === 'permanent') && (
             <Typography variant="caption" sx={{ color: '#8fa4b3' }}>
               {aiOnline ? 'AI Engine Online' : 'AI Engine Offline'}
