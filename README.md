@@ -83,8 +83,12 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
   review. Model selection during training prioritizes **sensitivity** (minimize
   false negatives).
 - **Engine-agnostic inference**: the API uses a trained CNN when a
-  `model.pth` state dict is present at `MODEL_PATH`, and otherwise falls back
-  to a deterministic baseline heuristic so the whole app works out of the box.
+  `model.pth` state dict is present at `MODEL_PATH`. With the model missing
+  and `ALLOW_HEURISTIC_FALLBACK=false` (the production default), prediction
+  requests **fail loudly** rather than serve guessed diagnoses. A dev-only
+  deterministic baseline heuristic is available for demos by explicitly
+  setting `ALLOW_HEURISTIC_FALLBACK=true` — it is never used silently in
+  production.
 
 ## Tech stack
 
@@ -201,8 +205,9 @@ curl -s http://localhost:8000/api/v1/health
 
 ## Training a real model (roadmap steps 2 & 5)
 
-The API works immediately with the baseline heuristic engine, but for a
-clinical-grade model, fine-tune a CNN and drop the state dict at `MODEL_PATH`:
+The API serves the trained CNN as soon as a state dict exists at
+`MODEL_PATH` (the repo ships with `model.pth`). To train or improve the
+model, fine-tune a CNN and drop the resulting state dict at `MODEL_PATH`:
 
 ```bash
 cd backend
@@ -237,8 +242,11 @@ docker compose up --build
 * HTTPS/TLS: terminate at a reverse proxy / load balancer in front of the
   stack (`SSL_CERTFILE`/`SSL_KEYFILE` in the backend `.env` can also enable
   uvicorn TLS directly).
-* To enable the trained model in Docker: copy `model.pth` into
-  `./backend/models/` (bind-mounted read-only into the container).
+* The trained model is enabled by default: `model.pth` is bind-mounted
+  read-only into the container from `./backend/models/`.
+* If no model file is present and `ALLOW_HEURISTIC_FALLBACK` is unset/false,
+  `/api/v1/health` reports `model_loaded: false` and prediction requests
+  return a clear 500 (no fabricated diagnoses).
 
 ## Repository layout
 
@@ -286,7 +294,7 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 33 tests, no GPU/torch needed
+# Backend — 50 tests (validation, cleanup, security, RBAC, ML safety)
 cd backend
 .venv/Scripts/python -m pytest -q
 

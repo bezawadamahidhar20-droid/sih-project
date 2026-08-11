@@ -64,7 +64,8 @@ def _load_model(args, device):
     from app.services.model_inference import build_model
 
     model, target_layer = build_model(args.arch, args.num_classes)
-    state_dict = torch.load(args.model, map_location=device)
+    # weights_only=True: never unpickle arbitrary objects from a checkpoint.
+    state_dict = torch.load(args.model, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model = model.to(device)
     model.eval()

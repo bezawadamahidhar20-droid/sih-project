@@ -418,10 +418,6 @@ class ApiService {
     }
   }
 
-  getImageUrl(path: string): string {
-    return `${API_BASE_URL}/predictions/image/${path}`;
-  }
-
   async healthCheck(): Promise<HealthResponse> {
     try {
       const response = await this.client.get<HealthResponse>('/health');

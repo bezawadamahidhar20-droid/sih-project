@@ -202,7 +202,11 @@ class ModelService:
             settings.model_architecture, settings.model_num_classes
         )
 
-        state_dict = torch.load(str(model_path), map_location=self._device)
+        # weights_only=True blocks pickle gadget chains: a malicious or
+        # corrupted checkpoint can never execute arbitrary code during load.
+        state_dict = torch.load(
+            str(model_path), map_location=self._device, weights_only=True
+        )
         model.load_state_dict(state_dict)
 
         model.to(self._device)

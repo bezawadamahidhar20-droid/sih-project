@@ -182,7 +182,11 @@ export function SettingsPage() {
                     { label: 'Inference engine', value: health.engine, mono: true },
                     {
                       label: 'Trained model',
-                      value: health.model_loaded ? 'Loaded (CNN active)' : 'Not loaded (baseline heuristic active)',
+                      value: health.model_loaded
+                        ? 'Loaded (CNN active)'
+                        : health.heuristic_fallback_active
+                        ? 'Not loaded (dev heuristic active)'
+                        : 'Not loaded (predictions unavailable)',
                       highlight: health.model_loaded ? 'success' : 'warning',
                     },
                     { label: 'Compute device', value: health.device, mono: true },
@@ -206,9 +210,11 @@ export function SettingsPage() {
                 </Stack>
               ) : null}
               <Alert severity="info" variant="outlined">
-                The AI uses a trained CNN when a model state dict is present at <code>MODEL_PATH</code>, and
-                falls back to a deterministic baseline heuristic otherwise. The <code>/api/v1/health</code>{' '}
-                endpoint reports the current engine status.
+                The AI uses a trained CNN when a model state dict is present at <code>MODEL_PATH</code>.
+                With the model missing and <code>ALLOW_HEURISTIC_FALLBACK=false</code> (the production
+                default) prediction requests fail loudly rather than serve guessed diagnoses. The
+                dev-only baseline heuristic is used only when that flag is explicitly set to{' '}
+                <code>true</code>. The <code>/api/v1/health</code> endpoint reports the current engine status.
               </Alert>
             </Stack>
           )}
@@ -226,7 +232,13 @@ export function SettingsPage() {
                   },
                   {
                     label: 'Model loaded',
-                    status: health ? (health.model_loaded ? 'Yes — CNN active' : 'No — baseline heuristic') : '—',
+                    status: health
+                      ? health.model_loaded
+                        ? 'Yes — CNN active'
+                        : health.heuristic_fallback_active
+                        ? 'No — dev heuristic active'
+                        : 'No — predictions unavailable'
+                      : '—',
                     ok: health?.model_loaded ?? false,
                   },
                   { label: 'Authentication', status: 'JWT + refresh tokens', ok: true },

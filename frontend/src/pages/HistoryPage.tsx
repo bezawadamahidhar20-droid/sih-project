@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -26,6 +26,35 @@ import { StatusChip, ConfidenceBadge, FindingChip } from '../components/common/S
 import { EmptyState } from '../components/common/EmptyState';
 import { ScanCardSkeleton } from '../components/common/Skeletons';
 import { AuthImage } from '../components/common/AuthImage';
+
+// Renders the thumbnail only when the card scrolls near the viewport, so a
+// 200-row history does not fire 200 authenticated image downloads at once.
+function LazyThumb({ src, alt }: { src?: string | null; alt: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Box ref={ref} sx={{ height: '100%' }}>
+      {inView ? <AuthImage src={src} alt={alt} objectFit="cover" /> : null}
+    </Box>
+  );
+}
 
 export function HistoryPage() {
   const navigate = useNavigate();
@@ -200,7 +229,7 @@ export function HistoryPage() {
                 onClick={() => navigate(`/results/${p.scan_id}`)}
               >
                 <Box sx={{ height: 140, bgcolor: '#0b1620', backgroundImage: 'linear-gradient(135deg, #0b1620 0%, #12283a 100%)' }}>
-                  <AuthImage src={p.gradcam_url ?? undefined} alt={p.predicted_class} objectFit="cover" />
+                  <LazyThumb src={p.gradcam_url} alt={p.predicted_class} />
                 </Box>
                 <Box sx={{ p: 2 }}>
                   <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>

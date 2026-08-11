@@ -25,6 +25,8 @@ import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
 import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
 import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
 import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded';
+import PrintRoundedIcon from '@mui/icons-material/PrintRounded';
+import TagRoundedIcon from '@mui/icons-material/TagRounded';
 import { alpha } from '@mui/material/styles';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -139,11 +141,38 @@ export function ResultsPage() {
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h2">Diagnostic Result</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          {scan?.original_filename ?? 'Loading scan…'}
+      {/* Print-only report header (hidden on screen, shown when printing) */}
+      <Box className="print-only report-header" sx={{ display: 'none' }}>
+        <Typography variant="h5">MediScan AI — Diagnostic Report</Typography>
+        <Typography variant="body2">
+          Scan #{scan?.id ?? '—'} · {scan?.original_filename ?? ''}
+          {scan?.anonymized_patient_id ? ` · Patient ${scan.anonymized_patient_id}` : ''}
+          {pred ? ` · ${pred.predicted_class} (${Math.round(pred.confidence * 100)}% confidence)` : ''}
         </Typography>
+        <Typography variant="caption">
+          Generated {new Date().toLocaleString()} · Decision-support output — must be reviewed by a qualified clinician.
+        </Typography>
+      </Box>
+
+      <Box>
+        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
+          <Box>
+            <Typography variant="h2">Diagnostic Result</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {scan?.original_filename ?? 'Loading scan…'}
+            </Typography>
+          </Box>
+          {status === 'ready' && result && (
+            <Button
+              className="no-print"
+              variant="outlined"
+              startIcon={<PrintRoundedIcon />}
+              onClick={() => window.print()}
+            >
+              Print Report
+            </Button>
+          )}
+        </Stack>
       </Box>
 
       {error && <Alert severity="error">{error}</Alert>}
@@ -272,6 +301,7 @@ export function ResultsPage() {
                   </Stack>
                   <Stack spacing={1.5}>
                     {[
+                      { icon: TagRoundedIcon, label: 'Scan ID', value: scan?.id != null ? `#${scan.id}` : '—', mono: true },
                       { icon: PersonRoundedIcon, label: 'Patient ID', value: scan?.anonymized_patient_id ?? '—', mono: true },
                       { icon: DescriptionRoundedIcon, label: 'File', value: scan?.original_filename ?? '—' },
                       { icon: ScannerRoundedIcon, label: 'Modality', value: scan?.modality ?? '—' },
@@ -280,6 +310,11 @@ export function ResultsPage() {
                         icon: AccessTimeRoundedIcon,
                         label: 'Study date',
                         value: scan?.study_date ? new Date(scan.study_date).toLocaleDateString() : '—',
+                      },
+                      {
+                        icon: AccessTimeRoundedIcon,
+                        label: 'Analyzed at',
+                        value: pred.created_at ? new Date(pred.created_at).toLocaleString() : '—',
                       },
                       {
                         icon: AccessTimeRoundedIcon,

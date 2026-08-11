@@ -11,10 +11,13 @@ import {
   Alert,
   Chip,
   Divider,
+  LinearProgress,
 } from '@mui/material';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 import { alpha } from '@mui/material/styles';
 
+import MemoryRoundedIcon from '@mui/icons-material/MemoryRounded';
+import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded';
 import PendingActionsRoundedIcon from '@mui/icons-material/PendingActionsRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
@@ -22,7 +25,7 @@ import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import DescriptionRoundedIcon from '@mui/icons-material/DescriptionRounded';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { Prediction, Scan } from '../types';
+import { HealthResponse, Prediction, Scan } from '../types';
 import { StatusChip, ConfidenceBadge, FindingChip } from '../components/common/StatusChip';
 import { EmptyState } from '../components/common/EmptyState';
 import { StatCardSkeleton } from '../components/common/Skeletons';
@@ -52,20 +55,30 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [scans, setScans] = useState<Scan[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([api.getScans({ page_size: 100 }), api.getPredictions({ page_size: 100 })])
+    // Scans + predictions are the dashboard's core data; health is auxiliary,
+    // so a health endpoint failure must NOT blank the whole dashboard.
+    Promise.allSettled([api.getScans({ page_size: 100 }), api.getPredictions({ page_size: 100 })])
       .then(([scansRes, predictionsRes]) => {
         if (!active) return;
-        setScans(scansRes.scans);
-        setPredictions(predictionsRes.predictions);
+        if (scansRes.status === 'fulfilled') setScans(scansRes.value.scans);
+        if (predictionsRes.status === 'fulfilled') setPredictions(predictionsRes.value.predictions);
+        if (scansRes.status === 'rejected' && predictionsRes.status === 'rejected') {
+          const err = scansRes.reason ?? predictionsRes.reason;
+          setError(err?.response?.data?.detail || 'Failed to load dashboard data.');
+        }
       })
-      .catch((err) => active && setError(err.response?.data?.detail || 'Failed to load dashboard data.'))
       .finally(() => active && setLoading(false));
+    api
+      .healthCheck()
+      .then((h) => active && setHealth(h))
+      .catch(() => active && setHealth(null));
     return () => {
       active = false;
     };
@@ -79,6 +92,23 @@ export function DashboardPage() {
   const flaggedPredictions = predictions.filter((p) => p.is_flagged).length;
   const lowConfidence = predictions.filter((p) => p.is_low_confidence).length;
   const needsAttention = predictions.filter((p) => p.is_flagged || p.is_low_confidence || p.is_high_risk);
+
+  // ---- Real statistics computed from backend data (never invented) ----
+  const completedScans = scans.filter((s) => s.status === 'completed').length;
+  const failedScans = scans.filter((s) => s.status === 'failed').length;
+  const averageConfidence =
+    predictions.length > 0
+      ? predictions.reduce((acc, p) => acc + p.confidence, 0) / predictions.length
+      : null;
+  const distribution = Object.entries(
+    predictions.reduce<Record<string, number>>((acc, p) => {
+      acc[p.predicted_class] = (acc[p.predicted_class] ?? 0) + 1;
+      return acc;
+    }, {})
+  )
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
+  const maxDistCount = Math.max(1, ...distribution.map((d) => d.count));
 
   const recentScans = [...scans]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -178,6 +208,99 @@ export function DashboardPage() {
                 </motion.div>
               </Grid>
             ))}
+      </Grid>
+
+      {/* Model & system status (real /health data) */}
+      <Grid container spacing={2.5}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ p: 2.5, borderRadius: 3, height: '100%' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
+              <MemoryRoundedIcon fontSize="small" color="primary" />
+              <Typography variant="h6">AI Engine & Model</Typography>
+            </Stack>
+            {loading ? (
+              <StatCardSkeleton />
+            ) : !health ? (
+              <Typography variant="body2" color="text.secondary">Status unavailable — API unreachable.</Typography>
+            ) : (
+              <Stack spacing={1.5}>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Inference engine</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                    {health.engine}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Trained model</Typography>
+                  <Chip
+                    size="small"
+                    label={health.model_loaded ? 'Loaded — CNN active' : 'Not loaded'}
+                    color={health.model_loaded ? 'success' : 'warning'}
+                    variant="outlined"
+                  />
+                </Stack>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Compute device</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{health.device}</Typography>
+                </Stack>
+                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">API version</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{health.version}</Typography>
+                </Stack>
+                {health.heuristic_fallback_active && (
+                  <Alert severity="warning" variant="outlined">
+                    Baseline heuristic engine is active (dev-only). Predictions are not clinical-grade.
+                  </Alert>
+                )}
+              </Stack>
+            )}
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, md: 6 }}>
+          <Card sx={{ p: 2.5, borderRadius: 3, height: '100%' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
+              <InsightsRoundedIcon fontSize="small" color="secondary" />
+              <Typography variant="h6">Prediction Distribution</Typography>
+            </Stack>
+            {loading ? (
+              <StatCardSkeleton />
+            ) : predictions.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">No predictions yet.</Typography>
+            ) : (
+              <Stack spacing={1.25}>
+                {distribution.map((d) => (
+                  <Stack key={d.label} direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ width: 110, flexShrink: 0 }} noWrap>
+                      {d.label}
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={(d.count / maxDistCount) * 100}
+                      sx={{ flex: 1, height: 8, borderRadius: 4, '& .MuiLinearProgress-bar': { borderRadius: 4 } }}
+                    />
+                    <Typography variant="body2" sx={{ width: 90, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {d.count} · {Math.round((d.count / predictions.length) * 100)}%
+                    </Typography>
+                  </Stack>
+                ))}
+                <Divider sx={{ my: 1 }} />
+                <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">Average confidence</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {averageConfidence != null ? `${Math.round(averageConfidence * 100)}%` : '—'}
+                  </Typography>
+                </Stack>
+                <Stack direction="row" sx={{ justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">Completed / failed scans</Typography>
+                  <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {completedScans} / {failedScans}
+                  </Typography>
+                </Stack>
+              </Stack>
+            )}
+          </Card>
+        </Grid>
       </Grid>
 
       {!loading && needsAttention.length > 0 && (

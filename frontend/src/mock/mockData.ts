@@ -152,6 +152,7 @@ export const DEMO_HEALTH: HealthResponse = {
   model_loaded: true,
   engine: 'resnet50-cnn',
   device: 'cuda:0',
+  model_path: '/app/models/model.pth',
+  heuristic_fallback_active: false,
 };
 
-export const IS_DEMO_FLAG = 'mediscan_demo_mode';

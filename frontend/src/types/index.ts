@@ -88,6 +88,8 @@ export interface HealthResponse {
   model_loaded: boolean;
   engine: string;
   device: string;
+  model_path?: string;
+  heuristic_fallback_active?: boolean;
 }
 
 export interface ApiError {

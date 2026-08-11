@@ -3,9 +3,10 @@ import uuid
 import mimetypes
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_active_user, require_roles, require_staff_or_above
@@ -16,7 +17,7 @@ from app.core.config import get_settings
 from app.core.security import encrypt_file
 from app.core.logging import audit_logger, get_logger
 from app.db.session import get_db
-from app.db.models import Scan, User, UserRole
+from app.db.models import Scan, Prediction, User, UserRole
 from app.services.image_processing import load_image
 
 settings = get_settings()
@@ -49,17 +50,32 @@ def validate_file(file: UploadFile) -> None:
 
 @router.post("/upload", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
 async def upload_scan(
+    request: Request,
     file: UploadFile = File(...),
-    anonymized_patient_id: Optional[str] = Form(None),
+    anonymized_patient_id: Optional[str] = Form(None, max_length=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_staff_or_above)
 ):
     validate_file(file)
-    
+
+    # Reject oversized uploads before buffering the body when the client
+    # sends a Content-Length (multipart parsers may not, so the in-memory
+    # check below remains authoritative).
+    max_bytes = settings.max_file_size_mb * 1024 * 1024
+    try:
+        content_length = int(request.headers.get("content-length", "0") or "0")
+    except (TypeError, ValueError):
+        content_length = 0
+    if content_length > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Max size: {settings.max_file_size_mb}MB"
+        )
+
     content = await file.read()
     file_size = len(content)
     
-    if file_size > settings.max_file_size_mb * 1024 * 1024:
+    if file_size > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File too large. Max size: {settings.max_file_size_mb}MB"
@@ -119,7 +135,18 @@ async def upload_scan(
     )
     
     db.add(scan)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Concurrent duplicate upload slipping past the pre-check: the unique
+        # index on file_hash is the final authority.
+        await db.rollback()
+        if os.path.exists(encrypted_path):
+            os.remove(encrypted_path)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File already uploaded (duplicate detected)"
+        )
     await db.refresh(scan)
     
     audit_logger.log_upload(
@@ -216,9 +243,33 @@ async def delete_scan(
     
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    
-    if os.path.exists(scan.encrypted_path):
-        os.remove(scan.encrypted_path)
-    
+
+    # Cascade cleanup: remove the associated prediction (FK), the derived
+    # original/gradcam images, and the encrypted upload. Without this the
+    # prediction row would orphan on SQLite and the FK constraint would make
+    # the delete crash with a 500 on Postgres.
+    prediction = await db.execute(
+        select(Prediction).where(Prediction.scan_id == scan_id)
+    )
+    pred_row = prediction.scalar_one_or_none()
+    if pred_row:
+        await db.delete(pred_row)
+
+    gradcam_dir = os.path.join(settings.upload_dir, "gradcam")
+    for stem in (f"original_{scan.file_hash}.png", f"gradcam_{scan.file_hash}.png"):
+        for candidate in (os.path.join(gradcam_dir, stem), os.path.join(gradcam_dir, stem + ".enc")):
+            try:
+                if os.path.exists(candidate):
+                    os.remove(candidate)
+            except OSError:
+                pass
+
+    try:
+        if os.path.exists(scan.encrypted_path):
+            os.remove(scan.encrypted_path)
+    except OSError:
+        pass
+
     await db.delete(scan)
     await db.commit()
+    logger.info("Scan %s deleted by user %s", scan_id, current_user.id)
