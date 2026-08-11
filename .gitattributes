@@ -1,0 +1,6 @@
+# .env.example files are templates copied to .env — keep them LF everywhere
+# so git stops warning about CRLF conversion on Windows checkouts.
+*.env.example text eol=lf
+
+# Same for .gitignore (generates the same warning when touched).
+*.gitignore text eol=lf
