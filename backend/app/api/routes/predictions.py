@@ -10,7 +10,8 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
 from starlette.background import BackgroundTask
 
-from app.api.deps import get_current_active_user, require_roles
+from app.api.deps import get_current_active_user, require_roles, rate_limit
+from app.core.ratelimit import predict_limiter
 from app.api.schemas import (
     PredictionResponse, PredictionListResponse, PredictResponse,
     FlagPredictionRequest, ScanResponse,
@@ -92,7 +93,8 @@ def _run_inference_sync(
 async def predict_scan(
     scan_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    _rate_limited: None = Depends(rate_limit(predict_limiter)),
 ):
     query = select(Scan).where(Scan.id == scan_id).with_for_update()
 

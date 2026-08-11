@@ -104,3 +104,18 @@ async def get_optional_user(
         return await get_current_user(credentials, db)
     except HTTPException:
         return None
+
+
+def rate_limit(limiter):
+    """Dependency factory: enforce a sliding-window rate limit per user.
+
+    Usage: ``_rate_limited: None = Depends(rate_limit(predict_limiter))``
+    on an expensive endpoint. Returns 429 when the per-user budget in the
+    current window is exhausted.
+    """
+    def _checker(
+        request: Request,
+        current_user: User = Depends(get_current_active_user),
+    ) -> None:
+        limiter.check(request, current_user.id)
+    return _checker

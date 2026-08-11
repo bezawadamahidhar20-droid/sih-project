@@ -78,9 +78,13 @@ async def log_requests(request: Request, call_next):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Preserve headers the exception carries (e.g. Retry-After on 429) — the
+    # default handler would otherwise drop them and clients could not honor
+    # the back-off window.
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "error_code": f"HTTP_{exc.status_code}"}
+        content={"detail": exc.detail, "error_code": f"HTTP_{exc.status_code}"},
+        headers=exc.headers,
     )
 
 

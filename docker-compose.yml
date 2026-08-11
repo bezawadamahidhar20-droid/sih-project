@@ -7,14 +7,17 @@
 #   backend  FastAPI inference service (AES-256 at-rest, JWT + RBAC)
 #   frontend React SPA served by nginx, proxying /api to the backend
 #
-# Secrets are read from a root .env file if present (see .env.example), with
-# sane development defaults so the stack runs out of the box.
+# Secrets MUST be provided in a root .env file (see .env.example). The
+# `:?` syntax below makes `docker compose up` fail fast if any of the three
+# app secrets is missing — a misconfigured stack must never start with
+# forgeable JWTs or a decryptable data key.
 #
-# ⚠️  DEMO ACCOUNTS: SEED_DEMO_USERS defaults to TRUE and seeds well-known
-#     credentials (doctor / radiologist / staff, password DemoPass123!, also
-#     printed in the README). This is intentional for the SIH demo, but before
-#     ANY public deployment set SEED_DEMO_USERS=false AND replace the default
-#     JWT_SECRET_KEY / ENCRYPTION_KEY / ENCRYPTION_SALT values.
+# ⚠️  DEMO ACCOUNTS: SEED_DEMO_USERS defaults to FALSE. For the SIH demo,
+#     explicitly opt in with `SEED_DEMO_USERS=true docker compose up` — this
+#     seeds well-known credentials (doctor / radiologist / staff, password
+#     DemoPass123!, printed in the README). Any public deployment must keep
+#     SEED_DEMO_USERS unset/false AND provide real JWT_SECRET_KEY /
+#     ENCRYPTION_KEY / ENCRYPTION_SALT values.
 #
 # TLS: terminate HTTPS at a reverse proxy / load balancer in front of this
 # stack (e.g. nginx, Caddy, ALB) — never expose the backend port directly.
@@ -55,9 +58,9 @@ services:
       DEBUG: "false"
       ENVIRONMENT: ${ENVIRONMENT:-production}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mediscan}:${POSTGRES_PASSWORD:-mediscan}@db:5432/${POSTGRES_DB:-mediscan}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-32-chars-minimum-!!!!!!!!}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-change-me-32-chars-minimum-!!!!!!!!}
-      ENCRYPTION_SALT: ${ENCRYPTION_SALT:-change-me-16-chars!}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY (>=32 chars) in .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (>=32 chars) in .env}
+      ENCRYPTION_SALT: ${ENCRYPTION_SALT:?set ENCRYPTION_SALT (>=16 chars) in .env}
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
       MODEL_PATH: /app/models/model.pth
@@ -72,7 +75,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
       LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
       HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}
-      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
     volumes:
       - uploads:/app/uploads
       - logs:/app/logs

@@ -76,6 +76,67 @@ class TestUploadValidation:
         assert response.status_code == 422
 
 
+class TestRateLimiting:
+    async def test_upload_rate_limited_429(self, client, auth_headers, monkeypatch):
+        from app.core.config import get_settings
+        from app.core.ratelimit import upload_limiter
+
+        # Tighten the budget so the test needs no 30 real uploads.
+        monkeypatch.setattr(get_settings(), "upload_rate_limit_per_minute", 2)
+        upload_limiter.clear()
+
+        # Unique bytes per upload: the endpoint dedups by SHA-256, so reusing
+        # the same bytes would return 409 before the limiter is even reached.
+        def _fresh_png(seed: int) -> bytes:
+            rng = np.random.default_rng(seed)
+            arr = (np.clip(rng.normal(0.5, 0.2, (64, 64)), 0, 1) * 255).astype(np.uint8)
+            img = Image.fromarray(arr, mode="L").convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+
+        for seed in (101, 202):
+            resp = await client.post(
+                "/api/v1/scans/upload",
+                files={"file": ("scan.png", _fresh_png(seed), "image/png")},
+                headers=auth_headers,
+            )
+            assert resp.status_code == 201, resp.text
+
+        third = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", _fresh_png(303), "image/png")},
+            headers=auth_headers,
+        )
+        assert third.status_code == 429
+        assert "Retry-After" in third.headers
+
+    async def test_predict_rate_limited_429(self, client, auth_headers, monkeypatch):
+        from app.core.config import get_settings
+        from app.core.ratelimit import predict_limiter
+
+        monkeypatch.setattr(get_settings(), "predict_rate_limit_per_minute", 2)
+        predict_limiter.clear()
+
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", make_png_bytes(), "image/png")},
+            headers=auth_headers,
+        )
+        scan = upload.json()
+
+        for _ in range(2):
+            resp = await client.post(
+                f"/api/v1/predictions/predict/{scan['id']}", headers=auth_headers
+            )
+            assert resp.status_code == 200
+
+        third = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=auth_headers
+        )
+        assert third.status_code == 429
+
+
 class TestSecureCheckpointLoading:
     def test_weights_only_loading_is_used(self):
         """The inference service must load checkpoints with weights_only=True
@@ -153,3 +214,43 @@ class TestDeleteScanCascade:
 
         response = await client.delete(f"/api/v1/scans/{scan['id']}", headers=staff_headers)
         assert response.status_code == 403
+
+
+class TestProductionConfig:
+    """The app must refuse to boot in production with placeholder secrets, so
+    a public deployment can never start with forgeable JWTs or a decryptable
+    data key. Local development (ENVIRONMENT != production) stays permissive."""
+
+    PLACEHOLDER = {
+        "jwt_secret_key": "change-me-32-chars-minimum-!!!!!!!!",
+        "encryption_key": "change-me-32-chars-minimum-!!!!!!!!",
+        "encryption_salt": "change-me-16-chars!",
+        "database_url": "sqlite+aiosqlite:///:memory:",
+    }
+
+    def test_placeholder_secrets_rejected_in_production(self):
+        from app.core.config import Settings
+
+        with pytest.raises(ValueError, match="placeholder"):
+            Settings(environment="production", _env_file=None, **self.PLACEHOLDER)
+
+    def test_placeholder_secrets_allowed_in_development(self):
+        from app.core.config import Settings
+
+        # Dev convenience: local .env.example placeholders must still boot.
+        settings = Settings(environment="development", _env_file=None, **self.PLACEHOLDER)
+        assert settings.environment == "development"
+
+    def test_real_secrets_accepted_in_production(self):
+        from app.core.config import Settings
+
+        settings = Settings(
+            environment="production",
+            _env_file=None,
+            jwt_secret_key="f" * 64,
+            encryption_key="e" * 64,
+            encryption_salt="s" * 32,
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+        assert settings.environment == "production"
+        assert settings.seed_demo_users is False

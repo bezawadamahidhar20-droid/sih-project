@@ -130,8 +130,10 @@ uvicorn app.main:app --reload --port 8000
 
 * Interactive API docs: http://localhost:8000/docs
 * Note: the required `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, and `ENCRYPTION_SALT`
-  values from `.env.example` are dev placeholders — generate strong random
-  secrets before any real deployment.
+  values from `.env.example` are dev placeholders. In production the app
+  **refuses to start** with placeholder secrets (`ENVIRONMENT=production` +
+  a placeholder value → startup `ValueError`), so always generate strong
+  random secrets before any real deployment.
 
 ### 2. Frontend
 
@@ -157,14 +159,16 @@ surfaced instead of silently showing fabricated predictions.
 
 ## Demo accounts
 
-> ⚠️ **The Docker stack seeds demo accounts by default (`SEED_DEMO_USERS=true`)
-> with well-known credentials.** This is intentional for the SIH demo — but
-> before any public deployment set `SEED_DEMO_USERS=false` and rotate the
-> JWT/encryption secrets in `.env`.
+> ⚠️ **Demo-user seeding is opt-in, never a default.** The Docker stack
+> defaults `SEED_DEMO_USERS=false`; local development seeds demo users only
+> because `ENVIRONMENT` is not `production`. For the SIH demo, explicitly run
+> `SEED_DEMO_USERS=true docker compose up`. Any public deployment must keep
+> seeding off and provide real `JWT_SECRET_KEY` / `ENCRYPTION_KEY` /
+> `ENCRYPTION_SALT` values — compose fails fast if they are missing.
 
-The backend seeds these users when `SEED_DEMO_USERS=true` (default in the
-Docker stack) or when `ENVIRONMENT` is not `production`. All passwords are
-`DemoPass123!`:
+The backend seeds these users when `SEED_DEMO_USERS=true` (explicit opt-in
+for Docker; the local dev default) or when `ENVIRONMENT` is not `production`.
+All passwords are `DemoPass123!`:
 
 | Username | Role | Permissions |
 | --- | --- | --- |
@@ -230,9 +234,15 @@ for dataset formats, CLI flags, and CSV (NIH-style) support.
 ## Docker deployment (roadmap step 6)
 
 ```bash
-cp .env.example .env     # set real secrets in production
+cp .env.example .env     # real secrets are REQUIRED — compose refuses to start without them
 docker compose up --build
+# SIH demo with well-known accounts: SEED_DEMO_USERS=true docker compose up --build
 ```
+
+* `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, and `ENCRYPTION_SALT` use the `:?`
+  compose syntax: `docker compose up` **fails fast** if they are unset, so a
+  misconfigured stack can never boot with forgeable JWTs or a decryptable key.
+* Demo accounts are **not** seeded by default (`SEED_DEMO_USERS=false`).
 
 * Frontend: http://localhost:8080 (nginx serves the SPA, proxies `/api`)
 * Backend API: http://localhost:8000/docs (dev convenience mapping; remove
@@ -284,6 +294,11 @@ docker-compose.yml   # postgres + backend + frontend
 - **Brute-force protection**: `POST /auth/login` is rate-limited per
   IP + username (5 failures / 15 min, in-process — swap for Redis/nginx when
   scaling horizontally).
+- **Endpoint rate limiting**: upload and prediction endpoints are guarded by a
+  per-user sliding window (`UPLOAD_RATE_LIMIT_PER_MINUTE` /
+  `PREDICT_RATE_LIMIT_PER_MINUTE`, default 30/min) that returns 429 with
+  `Retry-After` — an in-process store, adequate for the single-worker stack,
+  replace with Redis when scaling horizontally.
 - **Audit logging**: structured JSON logs of uploads, predictions, auth
   events, and flags — written to `AUDIT_LOG_PATH` and stdout, never containing
   PHI. Access logs record paths only, not query strings.
@@ -294,7 +309,7 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 50 tests (validation, cleanup, security, RBAC, ML safety)
+# Backend — 55 tests (validation, cleanup, security, RBAC, ML safety, rate limits)
 cd backend
 .venv/Scripts/python -m pytest -q
 
@@ -321,8 +336,15 @@ npm run build
 3. Commit with a clear message and open a pull request.
 
 Before opening a PR, please run the backend tests and the frontend build
-locally, and do **not** commit real secrets, `.env` files, model weights
-(`*.pth`), datasets, or uploaded scans — all of these are gitignored.
+locally, and do **not** commit real secrets, `.env` files, datasets, or
+uploaded scans — those are gitignored.
+
+> ⚠️ **Model checkpoints are intentionally tracked.** Unlike datasets, the
+> trained CNN (`backend/models/model.pth` + summary/evaluation JSON) ships
+> with the repo because the API fails loudly without it (see
+> [Testing](#testing) and [Training a real model](#training-a-real-model-roadmap-steps-2--5)).
+> Only add *new* retrained checkpoints when they are meant to ship with the
+> product; keep experimental weights out of the repository.
 
 ## License
 

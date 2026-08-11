@@ -9,7 +9,8 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_current_active_user, require_roles, require_staff_or_above
+from app.api.deps import get_current_active_user, require_roles, require_staff_or_above, rate_limit
+from app.core.ratelimit import upload_limiter
 from app.api.schemas import (
     ScanResponse, ScanListResponse, ScanStatus
 )
@@ -54,7 +55,8 @@ async def upload_scan(
     file: UploadFile = File(...),
     anonymized_patient_id: Optional[str] = Form(None, max_length=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_staff_or_above)
+    current_user: User = Depends(require_staff_or_above),
+    _rate_limited: None = Depends(rate_limit(upload_limiter)),
 ):
     validate_file(file)
 

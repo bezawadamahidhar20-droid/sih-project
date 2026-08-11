@@ -48,6 +48,18 @@ def _reset_login_rate_limiter():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_endpoint_rate_limiters():
+    """Clear the upload/predict sliding-window limiters between tests so a
+    test that exhausts a budget cannot bleed into the next one."""
+    from app.core.ratelimit import upload_limiter, predict_limiter
+    upload_limiter.clear()
+    predict_limiter.clear()
+    yield
+    upload_limiter.clear()
+    predict_limiter.clear()
+
+
 @pytest.fixture(scope="session", autouse=True)
 async def setup_db():
     async with engine.begin() as conn:

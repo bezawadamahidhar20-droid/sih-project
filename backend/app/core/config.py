@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -63,7 +63,30 @@ class Settings(BaseSettings):
     low_confidence_threshold: float = 0.7
     high_risk_threshold: float = 0.9
 
+    # Per-user sliding-window budgets for expensive endpoints (429 beyond).
+    upload_rate_limit_per_minute: int = 30
+    predict_rate_limit_per_minute: int = 30
+
     seed_demo_users: bool = False
+
+    # Fail fast in production: refuse placeholder secrets so a misconfigured
+    # deployment can never start with forgeable JWTs / decryptable data.
+    _PLACEHOLDER_MARKERS = ("change-me", "changeme", "change_me")
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secrets_in_production(self) -> "Settings":
+        if self.environment.lower() == "production":
+            for name in ("jwt_secret_key", "encryption_key", "encryption_salt"):
+                value = getattr(self, name) or ""
+                lowered = value.lower()
+                if any(m in lowered for m in self._PLACEHOLDER_MARKERS):
+                    raise ValueError(
+                        f"{name.upper()} is set to a placeholder value while "
+                        "ENVIRONMENT=production. Generate strong secrets and "
+                        "provide them via environment variables — never ship "
+                        "well-known credentials to production."
+                    )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",
