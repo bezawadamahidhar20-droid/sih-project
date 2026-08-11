@@ -120,10 +120,12 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env
 
-# For a local dev run WITHOUT Postgres, switch the database to SQLite and
-# enable demo-user seeding in backend/.env:
+# backend/.env.example is pre-configured for local development out of the box:
+#   ENVIRONMENT=development           # placeholder secrets are accepted in dev
 #   DATABASE_URL=sqlite+aiosqlite:///./mediscan.db
-#   SEED_DEMO_USERS=true
+#   MODEL_PATH=./models/model.pth     # the trained CNN shipped in the repo
+#   ALLOW_HEURISTIC_FALLBACK=true     # dev baseline if the model is ever missing
+#   SEED_DEMO_USERS=true              # doctor / radiologist / staff (DemoPass123!)
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -159,12 +161,14 @@ surfaced instead of silently showing fabricated predictions.
 
 ## Demo accounts
 
-> ⚠️ **Demo-user seeding is opt-in, never a default.** The Docker stack
-> defaults `SEED_DEMO_USERS=false`; local development seeds demo users only
-> because `ENVIRONMENT` is not `production`. For the SIH demo, explicitly run
-> `SEED_DEMO_USERS=true docker compose up`. Any public deployment must keep
-> seeding off and provide real `JWT_SECRET_KEY` / `ENCRYPTION_KEY` /
-> `ENCRYPTION_SALT` values — compose fails fast if they are missing.
+> ⚠️ **Demo-user seeding is opt-in, never a production default.** The Docker
+> stack defaults `SEED_DEMO_USERS=false`; the local-dev template
+> (`backend/.env.example`) sets `SEED_DEMO_USERS=true`, and seeding also
+> activates whenever `ENVIRONMENT` is not `production`. For the SIH demo,
+> explicitly run `SEED_DEMO_USERS=true docker compose up`. Any public
+> deployment must keep seeding off and provide real `JWT_SECRET_KEY` /
+> `ENCRYPTION_KEY` / `ENCRYPTION_SALT` values — compose fails fast if they
+> are missing.
 
 The backend seeds these users when `SEED_DEMO_USERS=true` (explicit opt-in
 for Docker; the local dev default) or when `ENVIRONMENT` is not `production`.
@@ -309,7 +313,7 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 55 tests (validation, cleanup, security, RBAC, ML safety, rate limits)
+# Backend — 60 tests (validation, cleanup, security, RBAC, ML safety, rate limits, image-quality gate)
 cd backend
 .venv/Scripts/python -m pytest -q
 
