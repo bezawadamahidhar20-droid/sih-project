@@ -4,3 +4,6 @@
 
 # Same for .gitignore (generates the same warning when touched).
 *.gitignore text eol=lf
+
+# And for this file itself.
+.gitattributes text eol=lf
