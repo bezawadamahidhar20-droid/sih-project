@@ -15,6 +15,10 @@ frontend/dist/
 # Runtime data (never commit scans, encrypted files, or DBs)
 backend/uploads/
 backend/logs/
+# Safety net: backend/.env uses relative paths, so if the backend is ever
+# started from the repo root (not backend/), uploads/ and logs/ land here.
+/uploads/
+/logs/
 *.db
 *.sqlite3
 
