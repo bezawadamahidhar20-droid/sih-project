@@ -22,7 +22,10 @@ from app.core.logging import audit_logger, get_logger
 from app.core.timeutil import utcnow
 from app.db.session import get_db
 from app.db.models import Scan, Prediction, User, UserRole, ScanStatus
-from app.services.image_processing import load_image, preprocess_image, create_overlay_image, save_image
+from app.services.image_processing import (
+    load_image, preprocess_image, create_overlay_image, save_image,
+    validate_image_quality, ImageQualityError,
+)
 from app.services.model_inference import get_model_service
 
 settings = get_settings()
@@ -58,6 +61,10 @@ def _run_inference_sync(
     # is cleaned up by the caller's ``finally``).
     if persist_path != temp_decrypted and os.path.exists(persist_path):
         os.remove(persist_path)
+
+    # Never silently classify a blank/degenerate image: the model would still
+    # answer (usually with high confidence) on garbage. Fail loudly instead.
+    validate_image_quality(image)
 
     input_np = preprocess_image(image, input_size)
 
@@ -185,6 +192,19 @@ async def predict_scan(
 
         return await _build_predict_response(prediction, scan)
 
+    except ImageQualityError as e:
+        # The file is a valid image but cannot support meaningful inference
+        # (blank / degenerate). 422 with an actionable message, not a 500.
+        scan.status = ScanStatus.FAILED
+        await db.commit()
+        logger.warning("Image quality check failed (scan %s): %s", scan_id, e)
+        audit_logger.log_error(
+            user_id=str(current_user.id),
+            error_type="image_quality_rejected",
+            error_message=str(e),
+            context={"scan_id": scan_id},
+        )
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         scan.status = ScanStatus.FAILED
         await db.commit()
@@ -264,7 +284,7 @@ def _scan_response(scan: Scan) -> ScanResponse:
 @router.get("", response_model=PredictionListResponse)
 async def list_predictions(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=300),
     patient_id: Optional[str] = Query(None),
     predicted_class: Optional[str] = Query(None),
     min_confidence: Optional[float] = Query(None, ge=0, le=1),
@@ -304,7 +324,7 @@ async def list_predictions(
 
     return {
         "predictions": [
-            _to_prediction_response(p, _gradcam_url(p)) for p in predictions
+            _to_prediction_response(p, _gradcam_url(p), p.scan) for p in predictions
         ],
         "total": total,
         "page": page,
@@ -334,7 +354,7 @@ async def get_prediction(
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
-    return _to_prediction_response(prediction, _gradcam_url(prediction))
+    return _to_prediction_response(prediction, _gradcam_url(prediction), prediction.scan)
 
 
 @router.post("/{prediction_id}/flag", response_model=PredictionResponse)
@@ -355,6 +375,11 @@ async def flag_prediction(
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
+    # Capture the relationship while selectinload guarantees it is loaded:
+    # Session.refresh() below expires attributes, and an async session cannot
+    # lazy-load a relationship afterwards (MissingGreenlet -> 500).
+    scan = prediction.scan
+
     prediction.is_flagged = request.flagged
     prediction.flagged_by = current_user.id if request.flagged else None
     prediction.flagged_at = utcnow() if request.flagged else None
@@ -372,7 +397,7 @@ async def flag_prediction(
         }
     )
 
-    return _to_prediction_response(prediction, _gradcam_url(prediction))
+    return _to_prediction_response(prediction, _gradcam_url(prediction), scan)
 
 
 async def _scan_for_image(db: AsyncSession, filename: str) -> Optional[Scan]:
@@ -460,7 +485,7 @@ async def get_patient_history(
     result = await db.execute(query)
     predictions = result.scalars().all()
 
-    return [_to_prediction_response(p, _gradcam_url(p)) for p in predictions]
+    return [_to_prediction_response(p, _gradcam_url(p), p.scan) for p in predictions]
 
 
 def _gradcam_url(prediction: Prediction) -> Optional[str]:

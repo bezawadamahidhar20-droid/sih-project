@@ -180,7 +180,7 @@ def parse_dicom_date(date_str: Optional[str]) -> Optional[datetime]:
 @router.get("", response_model=ScanListResponse)
 async def list_scans(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=300),
     status_filter: Optional[ScanStatus] = Query(None),
     patient_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),

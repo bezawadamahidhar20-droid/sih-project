@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Box, Card, Typography, Stack, Divider, Chip } from '@mui/material';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Box, Button, Card, Typography, Stack, Divider, Chip } from '@mui/material';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 import PsychologyRoundedIcon from '@mui/icons-material/PsychologyRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
@@ -31,15 +31,25 @@ export function AuditLogsPage() {
   const [scans, setScans] = useState<Scan[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
+  const loadLogs = useCallback(() => {
+    setLoading(true);
+    setError('');
     Promise.all([api.getScans({ page_size: 200 }), api.getPredictions({ page_size: 200 })])
       .then(([s, p]) => {
         setScans(s.scans);
         setPredictions(p.predictions);
       })
+      .catch((err: any) =>
+        setError(err?.response?.data?.detail || 'Failed to load audit logs.')
+      )
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadLogs();
+  }, [loadLogs]);
 
   const entries: LogEntry[] = useMemo(() => {
     const list: LogEntry[] = [];
@@ -84,11 +94,28 @@ export function AuditLogsPage() {
         </Typography>
       </Box>
 
+      {error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={loadLogs}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
       {loading ? (
         <Card sx={{ borderRadius: 3 }}>
           {[1, 2, 3, 4, 5].map((i) => (
             <TableRowSkeleton key={i} cols={4} />
           ))}
+        </Card>
+      ) : error ? (
+        <Card sx={{ borderRadius: 3 }}>
+          <EmptyState icon={AccessTimeRoundedIcon} title="Couldn't load audit logs" description="The request failed. Check your connection and try again." />
         </Card>
       ) : entries.length === 0 ? (
         <Card sx={{ borderRadius: 3 }}>

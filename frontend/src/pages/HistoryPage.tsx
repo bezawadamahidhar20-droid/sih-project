@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Alert,
   Box,
+  Button,
   Card,
   Typography,
   Stack,
@@ -60,22 +62,27 @@ export function HistoryPage() {
   const navigate = useNavigate();
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [flagFilter, setFlagFilter] = useState('all');
   const [view, setView] = useState<'grid' | 'table'>('grid');
 
-  useEffect(() => {
-    let active = true;
+  const loadPredictions = useCallback(() => {
     setLoading(true);
+    setError('');
     api
       .getPredictions({ page_size: 200 })
-      .then((res) => active && setPredictions(res.predictions))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+      .then((res) => setPredictions(res.predictions))
+      .catch((err: any) =>
+        setError(err?.response?.data?.detail || 'Failed to load scan history.')
+      )
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadPredictions();
+  }, [loadPredictions]);
 
   const classes = useMemo(() => Array.from(new Set(predictions.map((p) => p.predicted_class))), [predictions]);
 
@@ -184,6 +191,19 @@ export function HistoryPage() {
         </Stack>
       </Card>
 
+      {error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={loadPredictions}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
       {loading ? (
         <Grid container spacing={2.5}>
           {Array.from({ length: 8 }).map((_, i) => (
@@ -192,6 +212,14 @@ export function HistoryPage() {
             </Grid>
           ))}
         </Grid>
+      ) : error ? (
+        <Card sx={{ borderRadius: 3 }}>
+          <EmptyState
+            icon={ImageRoundedIcon}
+            title="Couldn't load history"
+            description="The request failed. Check your connection and try again."
+          />
+        </Card>
       ) : filtered.length === 0 ? (
         <Card sx={{ borderRadius: 3 }}>
           <EmptyState icon={ImageRoundedIcon} title="No matching scans" description="Try adjusting your search or filters." />

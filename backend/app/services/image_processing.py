@@ -163,6 +163,46 @@ def _save_anonymized_dicom(dataset: Dataset, output_path: str) -> None:
         ) from exc
 
 
+class ImageQualityError(ValueError):
+    """Raised when an uploaded image cannot support meaningful inference.
+
+    Distinct from a decode failure: the file is a valid image, but it is
+    blank/near-uniform or degenerate, so any CNN prediction on it would be a
+    confident guess on garbage.
+    """
+
+
+# Below this size, upscaling cannot preserve any anatomy worth analyzing.
+# 16px matches the smallest pixel arrays used in the test suite (DICOM).
+MIN_IMAGE_DIMENSION = 16
+# Std-dev (0-255 scale) below this means the image is essentially blank.
+MIN_IMAGE_STDDEV = 2.0
+
+
+def validate_image_quality(image: Image.Image) -> None:
+    """Reject images that would produce meaningless CNN predictions.
+
+    Called at prediction time (not upload), so files can be stored and
+    reviewed even when they fail the gate — but they are never fed to the
+    model silently. Raises :class:`ImageQualityError` with a user-facing
+    message.
+    """
+    width, height = image.size
+    if min(width, height) < MIN_IMAGE_DIMENSION:
+        raise ImageQualityError(
+            f"Image is too small ({width}x{height}) to analyze. "
+            f"Upload a larger chest X-ray image (at least {MIN_IMAGE_DIMENSION}x{MIN_IMAGE_DIMENSION} pixels)."
+        )
+
+    gray = image.convert("L")
+    arr = np.asarray(gray, dtype=np.float32)
+    if arr.std() < MIN_IMAGE_STDDEV:
+        raise ImageQualityError(
+            "Image appears blank or contains no discernible content. "
+            "Upload a valid chest X-ray."
+        )
+
+
 def preprocess_image(image: Image.Image, target_size: int = 224) -> np.ndarray:
     image = image.resize((target_size, target_size), Image.Resampling.LANCZOS)
 

@@ -152,6 +152,16 @@ class TestPredictions:
         assert "predictions" in data
         assert "total" in data
 
+    async def test_list_endpoints_accept_large_page_size(self, client: AsyncClient, auth_headers):
+        # Regression: History/Patients/Review/Audit pages request 200-300 rows;
+        # the list endpoints used to cap at 100 and returned 422, breaking
+        # those pages entirely.
+        response = await client.get("/api/v1/predictions/?page_size=300", headers=auth_headers)
+        assert response.status_code == 200
+
+        scans_resp = await client.get("/api/v1/scans/?page_size=300", headers=auth_headers)
+        assert scans_resp.status_code == 200
+
 
 class TestRBAC:
     async def test_staff_cannot_access_users(self, client: AsyncClient, staff_headers):

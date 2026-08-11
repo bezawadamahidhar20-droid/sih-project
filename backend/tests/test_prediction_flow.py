@@ -95,6 +95,101 @@ class TestFullPredictionFlow:
         assert second.status_code == 409
 
 
+class TestPredictionIncludesScan:
+    """Regression: list/detail/flag/history responses must include the joined
+    Scan object — previously returned ``scan: null``, hiding patient ID and
+    filename from the UI."""
+
+    async def test_list_and_detail_include_scan_object(self, client, auth_headers):
+        png = make_png_bytes()
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", png, "image/png")},
+            headers=auth_headers,
+        )
+        assert upload.status_code == 201
+        scan_id = upload.json()["id"]
+
+        predict = await client.post(
+            f"/api/v1/predictions/predict/{scan_id}", headers=auth_headers
+        )
+        assert predict.status_code == 200
+        pred_id = predict.json()["prediction"]["id"]
+
+        listed = await client.get("/api/v1/predictions", headers=auth_headers)
+        assert listed.status_code == 200
+        entry = next(p for p in listed.json()["predictions"] if p["id"] == pred_id)
+        assert entry["scan"] is not None, "list response must include the scan"
+        assert entry["scan"]["id"] == scan_id
+        assert entry["scan"]["original_filename"] == "scan.png"
+
+        detail = await client.get(f"/api/v1/predictions/{pred_id}", headers=auth_headers)
+        assert detail.status_code == 200
+        assert detail.json()["scan"]["id"] == scan_id
+
+    async def test_patient_history_includes_scan_object(self, client, auth_headers):
+        png = make_png_bytes()
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", png, "image/png")},
+            data={"anonymized_patient_id": "PT-REGR-01"},
+            headers=auth_headers,
+        )
+        assert upload.status_code == 201
+        scan_id = upload.json()["id"]
+
+        predict = await client.post(
+            f"/api/v1/predictions/predict/{scan_id}", headers=auth_headers
+        )
+        assert predict.status_code == 200
+
+        history = await client.get(
+            "/api/v1/predictions/patient/PT-REGR-01/history", headers=auth_headers
+        )
+        assert history.status_code == 200
+        rows = history.json()
+        assert len(rows) == 1
+        assert rows[0]["scan"] is not None
+        assert rows[0]["scan"]["id"] == scan_id
+
+
+class TestImageQualityGate:
+    """Blank/degenerate images must never be fed to the CNN: they used to be
+    classified with high confidence. Predict now fails loudly with 422."""
+
+    def _solid_png(self, size: int = 256, fill: int = 128) -> bytes:
+        arr = np.full((size, size), fill, dtype=np.uint8)
+        img = Image.fromarray(arr, mode="L").convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    async def _upload(self, client, auth_headers, data: bytes, name: str = "scan.png") -> int:
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": (name, data, "image/png")},
+            headers=auth_headers,
+        )
+        assert upload.status_code == 201
+        return upload.json()["id"]
+
+    async def test_blank_image_predict_rejected_422(self, client, auth_headers):
+        scan_id = await self._upload(client, auth_headers, self._solid_png(256))
+        predict = await client.post(
+            f"/api/v1/predictions/predict/{scan_id}", headers=auth_headers
+        )
+        assert predict.status_code == 422
+        assert "blank" in predict.json()["detail"].lower()
+
+    async def test_degenerate_tiny_image_predict_rejected_422(self, client, auth_headers):
+        scan_id = await self._upload(client, auth_headers, self._solid_png(1, fill=200), "tiny.png")
+        predict = await client.post(
+            f"/api/v1/predictions/predict/{scan_id}", headers=auth_headers
+        )
+        assert predict.status_code == 422
+        assert "too small" in predict.json()["detail"].lower()
+
+
 class TestImageSecurity:
     async def test_path_traversal_rejected(self, client, auth_headers):
         response = await client.get(

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
-import { Box, Card, Typography, Stack, Chip, Button, ToggleButtonGroup, ToggleButton, Divider } from '@mui/material';
+import { Alert, Box, Card, Typography, Stack, Chip, Button, ToggleButtonGroup, ToggleButton, Divider } from '@mui/material';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded';
 import ReportRoundedIcon from '@mui/icons-material/ReportRounded';
@@ -19,14 +19,19 @@ export function ReviewQueuePage() {
   const { enqueueSnackbar } = useSnackbar();
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filter, setFilter] = useState<FilterKey>('all');
 
   const load = () => {
     setLoading(true);
+    setError('');
     api
       .getPredictions({ page_size: 300 })
       .then((res) =>
         setPredictions(res.predictions.filter((p) => p.is_flagged || p.is_low_confidence || p.is_high_risk))
+      )
+      .catch((err: any) =>
+        setError(err?.response?.data?.detail || 'Failed to load the review queue.')
       )
       .finally(() => setLoading(false));
   };
@@ -63,6 +68,19 @@ export function ReviewQueuePage() {
         </Typography>
       </Box>
 
+      {error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={load}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
       <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_, v) => v && setFilter(v)}>
         <ToggleButton value="all">All ({predictions.length})</ToggleButton>
         <ToggleButton value="flagged">Flagged ({predictions.filter((p) => p.is_flagged).length})</ToggleButton>
@@ -76,6 +94,10 @@ export function ReviewQueuePage() {
             <ScanCardSkeleton key={i} />
           ))}
         </Stack>
+      ) : error ? (
+        <Card sx={{ borderRadius: 3 }}>
+          <EmptyState icon={CheckCircleRoundedIcon} title="Couldn't load review queue" description="The request failed. Check your connection and try again." />
+        </Card>
       ) : filtered.length === 0 ? (
         <Card sx={{ borderRadius: 3 }}>
           <EmptyState icon={CheckCircleRoundedIcon} title="All clear" description="No cases currently require additional clinical review." />

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Card, Typography, Stack, TextField, InputAdornment, Grid, Chip, Avatar } from '@mui/material';
+import { Alert, Box, Button, Card, Typography, Stack, TextField, InputAdornment, Grid, Chip, Avatar } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import GroupRoundedIcon from '@mui/icons-material/GroupRounded';
@@ -23,21 +23,26 @@ export function PatientsPage() {
   const [scans, setScans] = useState<Scan[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    let active = true;
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setError('');
     Promise.all([api.getScans({ page_size: 300 }), api.getPredictions({ page_size: 300 })])
       .then(([s, p]) => {
-        if (!active) return;
         setScans(s.scans);
         setPredictions(p.predictions);
       })
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+      .catch((err: any) =>
+        setError(err?.response?.data?.detail || 'Failed to load patient data.')
+      )
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const patients: PatientSummary[] = useMemo(() => {
     const map = new Map<string, PatientSummary>();
@@ -88,6 +93,19 @@ export function PatientsPage() {
         sx={{ maxWidth: 360 }}
       />
 
+      {error && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={loadData}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
       {loading ? (
         <Grid container spacing={2.5}>
           {Array.from({ length: 6 }).map((_, i) => (
@@ -96,6 +114,10 @@ export function PatientsPage() {
             </Grid>
           ))}
         </Grid>
+      ) : error ? (
+        <Card sx={{ borderRadius: 3 }}>
+          <EmptyState icon={GroupRoundedIcon} title="Couldn't load patients" description="The request failed. Check your connection and try again." />
+        </Card>
       ) : filtered.length === 0 ? (
         <Card sx={{ borderRadius: 3 }}>
           <EmptyState icon={GroupRoundedIcon} title="No patients found" description="Upload scans with an anonymized patient ID to see them here." />
