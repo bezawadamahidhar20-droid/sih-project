@@ -268,12 +268,22 @@ class ApiService {
   }
 
   async fetchImageBlob(fullUrl: string): Promise<string> {
-    if (fullUrl.startsWith('demo://')) {
-      return fullUrl.includes('gradcam') ? '/images/demo-xray-heatmap.jpg' : '/images/demo-xray.jpg';
+    if (fullUrl.startsWith('/scans/') || fullUrl.startsWith('/images/') || fullUrl.startsWith('/mediscan_')) {
+      return fullUrl;
     }
-    const path = fullUrl.replace(/^\/api\/v1/, '');
-    const response = await this.client.get(path, { responseType: 'blob' });
-    return URL.createObjectURL(response.data);
+    if (fullUrl.startsWith('demo://')) {
+      return '/scans/scan_1.png';
+    }
+    try {
+      const path = fullUrl.replace(/^\/api\/v1/, '');
+      const response = await this.client.get(path, { responseType: 'blob' });
+      return URL.createObjectURL(response.data);
+    } catch (err) {
+      if (canFallbackToDemo(err)) {
+        return '/scans/scan_1.png';
+      }
+      throw err;
+    }
   }
 
   async getScans(params?: {

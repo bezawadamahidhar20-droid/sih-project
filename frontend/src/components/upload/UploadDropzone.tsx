@@ -11,6 +11,7 @@ import {
   TextField,
   Alert,
   Paper,
+  Grid,
 } from '@mui/material';
 import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
@@ -20,6 +21,7 @@ import InsertDriveFileRoundedIcon from '@mui/icons-material/InsertDriveFileRound
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded';
 import { api } from '../../services/api';
 import { Scan } from '../../types';
+import { tokens } from '../../theme';
 
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.dcm', '.dicom'];
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -247,6 +249,56 @@ export function UploadDropzone({ onUploaded, onError, defaultPatientId = '' }: U
           </Typography>
         </Stack>
       </Paper>
+
+      {/* 1-Click Sample Scan Quick Selector for Hackathon Reviewers */}
+      <Box sx={{ p: 2, borderRadius: 3, bgcolor: 'rgba(0, 180, 216, 0.06)', border: '1px solid rgba(0, 180, 216, 0.2)' }}>
+        <Typography variant="caption" sx={{ color: tokens.cyan, fontWeight: 700, mb: 1, display: 'block' }}>
+          HACKATHON JUDGE DEMO — QUICK SAMPLE SCANS:
+        </Typography>
+        <Grid container spacing={1}>
+          {[
+            { idx: 1, label: 'Normal Chest X-Ray', patientId: 'PAT-2026-0001' },
+            { idx: 2, label: 'Pneumonia Consolidation', patientId: 'PAT-2026-0002' },
+            { idx: 3, label: 'Thoracic Axial CT Scan', patientId: 'PAT-2026-0003' },
+            { idx: 4, label: 'Cardiomegaly X-Ray', patientId: 'PAT-2026-0004' },
+          ].map((sample) => (
+            <Grid key={sample.idx} size={{ xs: 6, sm: 3 }}>
+              <Button
+                fullWidth
+                size="small"
+                variant="outlined"
+                onClick={async () => {
+                  setPatientId(sample.patientId);
+                  try {
+                    const res = await fetch(`/scans/scan_${sample.idx}.png`);
+                    const blob = await res.blob();
+                    const file = new File([blob], `clinical_scan_${sample.patientId}.png`, { type: 'image/png' });
+                    const entry: FileEntry = {
+                      file,
+                      id: `${Date.now()}-sample-${sample.idx}`,
+                      preview: `/scans/scan_${sample.idx}.png`,
+                      status: 'pending',
+                      progress: 0,
+                    };
+                    setFiles((prev) => [...prev, entry]);
+                  } catch (e) {
+                    setGlobalError('Could not load sample scan');
+                  }
+                }}
+                sx={{
+                  py: 1,
+                  fontSize: '0.72rem',
+                  borderColor: 'rgba(0, 180, 216, 0.3)',
+                  color: tokens.textPrimary,
+                  '&:hover': { borderColor: tokens.cyan, bgcolor: 'rgba(0, 180, 216, 0.12)' },
+                }}
+              >
+                {sample.label}
+              </Button>
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
 
       {globalError && (
         <Alert severity="error" icon={<ErrorRoundedIcon fontSize="small" />} onClose={() => setGlobalError('')}>

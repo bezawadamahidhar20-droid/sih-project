@@ -66,12 +66,15 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
-class UserResponse(_UtcOffsetSerialization, UserBase):
-    # Response uses plain str: stored emails (e.g. seeded *.local demo
-    # addresses) must never fail serialization. Input validation in
-    # UserCreate/UserUpdate still enforces EmailStr.
-    email: str
+class UserResponse(_UtcOffsetSerialization, BaseModel):
+    # Response uses plain str: stored emails (e.g. seeded demo addresses)
+    # must never fail serialization. Input validation in UserCreate/UserUpdate
+    # still enforces EmailStr.
     id: int
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    role: UserRole = UserRole.STAFF
     is_active: bool
     created_at: datetime
     last_login: Optional[datetime] = None

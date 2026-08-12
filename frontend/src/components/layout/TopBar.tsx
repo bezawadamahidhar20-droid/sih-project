@@ -13,6 +13,7 @@ import {
   Divider,
   ListItemIcon,
   Chip,
+  Button,
 } from '@mui/material';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import NotificationsRoundedIcon from '@mui/icons-material/NotificationsRounded';
@@ -23,6 +24,7 @@ import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 import FlagRoundedIcon from '@mui/icons-material/FlagRounded';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
@@ -50,10 +52,12 @@ export function TopBar({
   onMenuToggle,
   aiOnline,
   pathname,
+  onOpenCopilot,
 }: {
   onMenuToggle: () => void;
   aiOnline: boolean;
   pathname: string;
+  onOpenCopilot?: () => void;
 }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -120,18 +124,36 @@ export function TopBar({
 
         <Chip
           size="small"
-          icon={<CircleIcon sx={{ fontSize: '8px !important', color: aiOnline ? '#3ddc84' : '#e05c5c' }} />}
-          label={aiOnline ? 'AI Online' : 'AI Offline'}
+          icon={<CircleIcon sx={{ fontSize: '8px !important', color: aiOnline ? '#10B981' : '#EF4444' }} />}
+          label={aiOnline ? 'AI Engine Ready' : 'AI Engine Standby'}
           variant="outlined"
           sx={{
             display: { xs: 'none', md: 'flex' },
-            color: aiOnline ? '#3ddc84' : '#e05c5c',
-            borderColor: aiOnline ? 'rgba(61,220,132,0.35)' : 'rgba(224,92,92,0.35)',
-            bgcolor: aiOnline ? 'rgba(61,220,132,0.08)' : 'rgba(224,92,92,0.08)',
+            color: aiOnline ? '#10B981' : '#EF4444',
+            borderColor: aiOnline ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)',
+            bgcolor: aiOnline ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
             fontWeight: 700,
             fontSize: '0.75rem',
           }}
         />
+
+        {onOpenCopilot && (
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={onOpenCopilot}
+            startIcon={<AutoAwesomeRoundedIcon style={{ color: '#00B4D8' }} />}
+            sx={{
+              display: { xs: 'none', sm: 'flex' },
+              borderColor: 'rgba(0, 180, 216, 0.3)',
+              color: '#F1F5F9',
+              bgcolor: 'rgba(0, 180, 216, 0.1)',
+              '&:hover': { bgcolor: 'rgba(0, 180, 216, 0.2)', borderColor: '#00B4D8' },
+            }}
+          >
+            AI Co-Pilot (Ctrl + K)
+          </Button>
+        )}
 
         <IconButton onClick={(e) => setNotifEl(e.currentTarget)} aria-label="Notifications">
           <motion.span

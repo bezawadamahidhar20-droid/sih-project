@@ -90,6 +90,7 @@ export function generateMockScans(count = 24): Scan[] {
     created.setHours(created.getHours() - hoursAgo);
     const status: Scan['status'] =
       i % 11 === 0 ? 'processing' : i % 17 === 0 ? 'failed' : i % 9 === 0 ? 'uploaded' : 'completed';
+    const scanImg = `/scans/scan_${((i - 1) % 6) + 1}.png`;
     scans.push({
       id: i,
       file_hash: `hash_${i}`,
@@ -104,7 +105,7 @@ export function generateMockScans(count = 24): Scan[] {
       uploaded_by: (i % 3) + 1,
       created_at: created.toISOString(),
       processed_at: status === 'completed' ? created.toISOString() : null,
-      thumbnail_url: null,
+      thumbnail_url: scanImg,
     });
   }
   return scans;
@@ -124,13 +125,14 @@ export function generateMockPredictions(scans: Scan[]): Prediction[] {
       const is_low_confidence = confidence < 0.7;
       const is_high_risk = !isNormal && confidence > 0.85 && (cls === 'Pneumonia' || cls === 'Cardiomegaly');
       const is_flagged = is_low_confidence ? rnd() > 0.5 : is_high_risk && rnd() > 0.6;
+      const scanImg = `/scans/scan_${((scan.id - 1) % 6) + 1}.png`;
       predictions.push({
         id: idx + 1,
         scan_id: scan.id,
         predicted_class: cls,
         confidence,
         all_probabilities: buildProbabilities(rnd, cls, confidence),
-        gradcam_url: `demo://gradcam/${scan.id}`,
+        gradcam_url: scanImg,
         processing_time_ms: Math.floor(180 + rnd() * 900),
         model_version: 'v1.4.2',
         model_architecture: rnd() > 0.3 ? 'resnet50-cnn' : 'baseline-heuristic',
@@ -140,7 +142,10 @@ export function generateMockPredictions(scans: Scan[]): Prediction[] {
         flagged_by: is_flagged ? 1 : null,
         flagged_at: is_flagged ? scan.created_at : null,
         model_decision_threshold: 0.8,
-        scan,
+        scan: {
+          ...scan,
+          thumbnail_url: scanImg,
+        },
         created_at: scan.created_at,
       });
     });

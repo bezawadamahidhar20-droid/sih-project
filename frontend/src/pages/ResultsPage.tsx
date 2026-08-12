@@ -26,6 +26,9 @@ import ShieldRoundedIcon from '@mui/icons-material/ShieldRounded';
 import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded';
 import PrintRoundedIcon from '@mui/icons-material/PrintRounded';
 import TagRoundedIcon from '@mui/icons-material/TagRounded';
+import CompareRoundedIcon from '@mui/icons-material/CompareRounded';
+import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded';
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
 import { alpha } from '@mui/material/styles';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -35,6 +38,10 @@ import { VerdictHero } from '../components/scan/VerdictHero';
 import { ConfidenceMeter } from '../components/scan/ConfidenceMeter';
 import { ClinicalSafetyBanner, BannerVariant } from '../components/common/ClinicalSafetyBanner';
 import { ClinicalFlagsRow } from '../components/common/StatusChip';
+import { ThreeDScanViewer } from '../components/scan/ThreeDScanViewer';
+import { ScanComparisonModal } from '../components/scan/ScanComparisonModal';
+import { ReportGeneratorModal } from '../components/scan/ReportGeneratorModal';
+import { TumorBoardModal } from '../components/scan/TumorBoardModal';
 
 const PROCESSING_STEPS = [
   'Decrypting scan…',
@@ -54,6 +61,9 @@ export function ResultsPage() {
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [error, setError] = useState('');
   const [processingStep, setProcessingStep] = useState(0);
+  const [compareModalOpen, setCompareModalOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [tumorBoardModalOpen, setTumorBoardModalOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -217,14 +227,40 @@ export function ResultsPage() {
             </Typography>
           </Box>
           {status === 'ready' && result && (
-            <Button
-              className="no-print"
-              variant="outlined"
-              startIcon={<PrintRoundedIcon />}
-              onClick={() => window.print()}
-            >
-              Print Report
-            </Button>
+            <Stack direction="row" spacing={1.5} className="no-print" sx={{ flexWrap: 'wrap', gap: 1 }}>
+              <Button
+                variant="outlined"
+                startIcon={<DownloadRoundedIcon />}
+                onClick={() => setReportModalOpen(true)}
+                sx={{ borderColor: 'rgba(0, 180, 216, 0.4)', color: '#00B4D8', fontWeight: 600 }}
+              >
+                Export Clinical Report
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<GroupsRoundedIcon />}
+                onClick={() => setTumorBoardModalOpen(true)}
+                sx={{ borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10B981', fontWeight: 600 }}
+              >
+                MDT Tumor Board Sign-off
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<CompareRoundedIcon />}
+                onClick={() => setCompareModalOpen(true)}
+                sx={{ borderColor: 'rgba(255, 255, 255, 0.15)', color: '#F1F5F9' }}
+              >
+                Compare Prior Scan
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<PrintRoundedIcon />}
+                onClick={() => window.print()}
+                sx={{ borderColor: 'rgba(255, 255, 255, 0.15)' }}
+              >
+                Print Report
+              </Button>
+            </Stack>
           )}
         </Stack>
       </Box>
@@ -266,6 +302,13 @@ export function ResultsPage() {
           {safetyVariant !== 'normal' && (
             <ClinicalSafetyBanner variant={safetyVariant} subMessage={result.warning ?? undefined} />
           )}
+
+          {/* 3D Volumetric DICOM Scan Viewer */}
+          <ThreeDScanViewer
+            scanImageUrl={result.original_image_url}
+            heatmapUrl={result.gradcam_overlay_url}
+            confidenceScore={pred.confidence}
+          />
 
           <Grid container spacing={3}>
             {/* Image viewer */}
@@ -462,6 +505,27 @@ export function ResultsPage() {
         <Button variant="outlined" onClick={() => navigate('/history')}>
           Back to Scan History
         </Button>
+      )}
+
+      <ScanComparisonModal
+        open={compareModalOpen}
+        onClose={() => setCompareModalOpen(false)}
+        currentScanUrl={result?.original_image_url}
+      />
+
+      {pred && (
+        <>
+          <ReportGeneratorModal
+            open={reportModalOpen}
+            onClose={() => setReportModalOpen(false)}
+            prediction={pred}
+          />
+          <TumorBoardModal
+            open={tumorBoardModalOpen}
+            onClose={() => setTumorBoardModalOpen(false)}
+            prediction={pred}
+          />
+        </>
       )}
     </Stack>
   );

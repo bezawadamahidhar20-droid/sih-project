@@ -33,6 +33,8 @@ import { ClinicalSafetyBanner } from '../components/common/ClinicalSafetyBanner'
 import { CountUp } from '../components/common/CountUp';
 import { SplitText } from '../components/common/SplitText';
 import { TiltCard } from '../components/common/TiltCard';
+import { HeroSceneLazy, tokens } from '../MediScanUIUpgrade';
+import { CriticalTriageBar } from '../components/common/CriticalTriageBar';
 
 function timeAgo(dateStr: string) {
   const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -127,28 +129,109 @@ export function DashboardPage() {
 
   return (
     <Stack spacing={3.5}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}>
-        <Box>
-          <Typography variant="h2" component="div">
-            <SplitText
-              text={getGreeting(displayName)}
-              splitType="words"
-              tag="span"
-              delay={35}
-              duration={0.7}
-              from={{ opacity: 0, y: 12 }}
-              to={{ opacity: 1, y: 0 }}
-              textAlign="left"
-            />
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Here's your diagnostic workspace for today.
-          </Typography>
-        </Box>
-        <Button variant="contained" startIcon={<CloudUploadRoundedIcon />} onClick={() => navigate('/upload')}>
-          Upload Scan
-        </Button>
-      </Stack>
+      <Card
+        sx={{
+          p: { xs: 2.5, md: 3.5 },
+          borderRadius: 4,
+          background: 'linear-gradient(135deg, rgba(19,41,75,0.7) 0%, rgba(15,110,110,0.4) 100%)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(61,154,154,0.25)',
+          boxShadow: '0 12px 36px rgba(11,26,46,0.3)',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        <Grid container spacing={3} sx={{ alignItems: 'center' }}>
+          <Grid size={{ xs: 12, md: 7 }}>
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <Chip
+                  label="MediScan AI v2.5 — Clinical Grade"
+                  size="small"
+                  sx={{
+                    bgcolor: alpha(tokens.cyanLight, 0.15),
+                    color: tokens.cyanLight,
+                    borderColor: alpha(tokens.cyanLight, 0.3),
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                  }}
+                />
+                <Chip
+                  label={health?.status === 'ok' ? 'AI Engine Ready' : 'System Standby'}
+                  size="small"
+                  sx={{
+                    bgcolor: alpha(health?.status === 'ok' ? tokens.confidenceHigh : tokens.confidenceLow, 0.15),
+                    color: health?.status === 'ok' ? tokens.confidenceHigh : tokens.confidenceLow,
+                  }}
+                />
+              </Stack>
+              <Typography variant="h2" component="div" sx={{ color: '#E7ECEF' }}>
+                <SplitText
+                  text={getGreeting(displayName)}
+                  splitType="words"
+                  tag="span"
+                  delay={35}
+                  duration={0.7}
+                  from={{ opacity: 0, y: 12 }}
+                  to={{ opacity: 1, y: 0 }}
+                  textAlign="left"
+                />
+              </Typography>
+              <Typography variant="body1" sx={{ color: 'rgba(231,236,239,0.75)', maxWidth: 540 }}>
+                Real-time 3D volumetric analysis & deep clinical decision support for radiological imaging.
+              </Typography>
+              <Stack direction="row" spacing={2} sx={{ pt: 1 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<CloudUploadRoundedIcon />}
+                  onClick={() => navigate('/upload')}
+                  sx={{
+                    bgcolor: tokens.cyan,
+                    '&:hover': { bgcolor: tokens.cyanLight },
+                    px: 3,
+                    py: 1.2,
+                  }}
+                >
+                  Upload New Scan
+                </Button>
+                <Button
+                  variant="outlined"
+                  endIcon={<ArrowForwardRoundedIcon />}
+                  onClick={() => navigate('/history')}
+                  sx={{
+                    borderColor: 'rgba(255,255,255,0.2)',
+                    color: '#E7ECEF',
+                    '&:hover': { borderColor: tokens.cyanLight, bgcolor: alpha(tokens.cyanLight, 0.1) },
+                    px: 2.5,
+                  }}
+                >
+                  Browse History
+                </Button>
+              </Stack>
+            </Stack>
+          </Grid>
+          <Grid size={{ xs: 12, md: 5 }}>
+            <Box
+              sx={{
+                height: { xs: 240, md: 280 },
+                width: '100%',
+                borderRadius: 3,
+                overflow: 'hidden',
+                background: 'radial-gradient(circle at center, rgba(61,154,154,0.15) 0%, transparent 70%)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              <HeroSceneLazy />
+            </Box>
+          </Grid>
+        </Grid>
+      </Card>
+
+      <CriticalTriageBar
+        findingName="High-Risk Pneumothorax / Massive Opacity"
+        patientName="PAT-8921 (John Doe)"
+        confidenceScore={0.94}
+      />
 
       {error && <Alert severity="error">{error}</Alert>}
 
