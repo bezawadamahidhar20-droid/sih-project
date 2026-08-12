@@ -459,7 +459,14 @@ class ModelService:
         cam: np.ndarray,
         elapsed_ms: float,
     ) -> Dict[str, Any]:
+        from app.services.image_processing import generate_natural_language_explanation
         classes = settings.model_classes
+        class_name = (
+            classes[predicted_class]
+            if 0 <= predicted_class < len(classes)
+            else f"Class_{predicted_class}"
+        )
+        explanation = generate_natural_language_explanation(cam, class_name)
         return {
             "predicted_class": predicted_class,
             "confidence": confidence,
@@ -467,11 +474,8 @@ class ModelService:
             "gradcam": cam,
             "processing_time_ms": elapsed_ms,
             "engine": self._engine,
-            "class_name": (
-                classes[predicted_class]
-                if 0 <= predicted_class < len(classes)
-                else f"Class_{predicted_class}"
-            ),
+            "class_name": class_name,
+            "explanation": explanation,
         }
 
 

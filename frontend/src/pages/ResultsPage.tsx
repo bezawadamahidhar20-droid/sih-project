@@ -378,6 +378,22 @@ export function ResultsPage() {
                     probabilities={pred.all_probabilities}
                     decisionThreshold={pred.model_decision_threshold}
                   />
+
+                  {pred.explanation && (
+                    <Box sx={{ mt: 2.5, p: 2, borderRadius: 2.5, bgcolor: 'rgba(15, 92, 140, 0.08)', border: '1px solid rgba(15, 92, 140, 0.25)' }}>
+                      <Stack direction="row" spacing={1.25} sx={{ alignItems: 'flex-start' }}>
+                        <LightbulbRoundedIcon sx={{ color: 'primary.main', fontSize: 20, mt: 0.2 }} />
+                        <Box>
+                          <Typography variant="subtitle2" sx={{ color: 'primary.main', fontWeight: 700 }}>
+                            Natural-Language XAI Explanation
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, lineHeight: 1.6 }}>
+                            {pred.explanation}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </Box>
+                  )}
                 </Card>
 
                 {isDoctor ? (

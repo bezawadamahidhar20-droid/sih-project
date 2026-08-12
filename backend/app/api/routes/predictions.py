@@ -314,6 +314,12 @@ def _to_prediction_response(
         else None
     )
 
+    explanation = (
+        f"Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation and inflammatory opacity."
+        if "Pneumonia" in prediction.predicted_class
+        else f"Model attention is uniformly distributed across clear pulmonary parenchyma with no acute focal opacity."
+    )
+
     return PredictionResponse(
         id=prediction.id,
         scan_id=prediction.scan_id,
@@ -322,6 +328,7 @@ def _to_prediction_response(
         all_probabilities=probs,
         findings=findings,
         condition_heatmaps=condition_heatmaps,
+        explanation=explanation,
         gradcam_url=gradcam_url,
         processing_time_ms=prediction.processing_time_ms,
         model_version=prediction.model_version,

@@ -254,3 +254,49 @@ def image_to_base64(image: Image.Image) -> str:
     image.save(buffered, format="PNG")
     import base64
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+
+def generate_natural_language_explanation(heatmap: np.ndarray, predicted_class: str) -> str:
+    """Generate a natural-language clinical explanation based on heatmap spatial distribution
+    and the predicted finding.
+    """
+    if heatmap is None or heatmap.size == 0:
+        return f"Diagnostic analysis completed for {predicted_class}."
+
+    h, w = heatmap.shape
+    h_mid, w_mid = h // 2, w // 2
+
+    # Split into 4 anatomical quadrants (radiological view: left side of image = patient's right)
+    top_left = float(heatmap[:h_mid, :w_mid].mean())
+    top_right = float(heatmap[:h_mid, w_mid:].mean())
+    bot_left = float(heatmap[h_mid:, :w_mid].mean())
+    bot_right = float(heatmap[h_mid:, w_mid:].mean())
+
+    quads = {
+        "upper right lung zone": top_left,
+        "upper left lung zone": top_right,
+        "lower right lung field": bot_left,
+        "lower left lung field": bot_right,
+    }
+
+    max_quad = max(quads, key=quads.get)
+    max_val = quads[max_quad]
+
+    if max_val < 0.2:
+        return "Model attention is broadly and evenly distributed across bilateral lung fields with no acute focal hyper-intensity regions."
+
+    pred_lower = predicted_class.lower()
+    if "pneumonia" in pred_lower:
+        return f"Model attention is heavily concentrated in the {max_quad}, consistent with focal airspace consolidation and inflammatory opacity."
+    elif "effusion" in pred_lower:
+        return f"Model attention is concentrated in the {max_quad}, consistent with fluid accumulation in the costophrenic region."
+    elif "cardiomegaly" in pred_lower:
+        return "Model attention is concentrated in the central mediastinal region, consistent with an enlarged cardiac silhouette."
+    elif "nodule" in pred_lower:
+        return f"Model attention is localized to a focal high-intensity lesion in the {max_quad}, consistent with a pulmonary nodule."
+    elif "atelectasis" in pred_lower:
+        return f"Model attention is concentrated in the {max_quad}, consistent with localized linear subsegmental lung collapse."
+    elif "normal" in pred_lower:
+        return "Model attention is uniformly distributed across clear pulmonary parenchyma with no evidence of focal opacity or consolidation."
+    else:
+        return f"Model attention is primary focused in the {max_quad}, supporting a clinical finding of {predicted_class}."
