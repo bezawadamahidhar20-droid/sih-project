@@ -188,6 +188,13 @@ class ApiService {
     return response.data;
   }
 
+  async downloadPredictionPdf(predictionId: number): Promise<Blob> {
+    const response = await this.client.get(`/predictions/${predictionId}/pdf`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  }
+
   async getUsers(): Promise<User[]> {
     const response = await this.client.get<User[]>('/auth/users');
     return response.data;

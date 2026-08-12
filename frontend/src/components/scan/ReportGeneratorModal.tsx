@@ -20,6 +20,7 @@ import VerifiedRoundedIcon from '@mui/icons-material/VerifiedRounded';
 import MedicalServicesRoundedIcon from '@mui/icons-material/MedicalServicesRounded';
 import { tokens } from '../../theme';
 import { Prediction } from '../../types';
+import { api } from '../../services/api';
 
 interface ReportGeneratorModalProps {
   open: boolean;
@@ -37,38 +38,22 @@ export function ReportGeneratorModal({ open, onClose, prediction }: ReportGenera
     window.print();
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     setDownloading(true);
-    setTimeout(() => {
-      const content = `MEDISCAN AI — CLINICAL RADIOLOGY REPORT
-==================================================
-Report ID: REP-${prediction.id}-${Date.now()}
-Date: ${new Date().toLocaleDateString()}
-Patient ID: ${prediction.scan?.anonymized_patient_id ?? 'PAT-2026-0001'}
-
-FINDINGS SUMMARY:
-Primary Diagnosis: ${prediction.predicted_class}
-Confidence Score: ${(prediction.confidence * 100).toFixed(1)}%
-Model Architecture: ${prediction.model_architecture} (${prediction.model_version})
-Processing Time: ${prediction.processing_time_ms ?? 240} ms
-
-PHYSICIAN IMPRESSION & NOTES:
-${physicianNotes}
-
-SECURITY & COMPLIANCE:
-Status: VERIFIED CLINICAL AUDIT TRAIL
-HIPAA / DICOM Part 10 Compliant Encryption
-Sign-off: Dr. Sarah Chen, MD (Chief Radiologist)
-`;
-      const element = document.createElement('a');
-      const file = new Blob([content], { type: 'text/plain' });
-      element.href = URL.createObjectURL(file);
-      element.download = `MediScan_Report_${prediction.scan?.anonymized_patient_id ?? 'PATIENT'}.txt`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
+    try {
+      const blob = await api.downloadPredictionPdf(prediction.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `MediScan_Report_Pred_${prediction.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.warn('PDF download fallback:', err);
+    } finally {
       setDownloading(false);
-    }, 600);
+    }
   };
 
   return (

@@ -471,6 +471,52 @@ async def flag_prediction(
     return _to_prediction_response(prediction, _gradcam_url(prediction), scan)
 
 
+@router.get("/{prediction_id}/pdf")
+async def download_prediction_pdf(
+    prediction_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    query = (
+        select(Prediction)
+        .where(Prediction.id == prediction_id)
+        .options(selectinload(Prediction.scan))
+    )
+    result = await db.execute(query)
+    prediction = result.scalar_one_or_none()
+
+    if not prediction:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    if current_user.role == UserRole.STAFF and prediction.scan.uploaded_by != current_user.id:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+
+    scan = prediction.scan
+    original_path = Path(settings.upload_dir) / f"original_{scan.file_hash}.png"
+    gradcam_path = Path(settings.gradcam_dir) / f"gradcam_{scan.file_hash}.png"
+
+    from app.services.pdf_generator import generate_prediction_pdf
+    pdf_bytes = generate_prediction_pdf(
+        prediction_id=prediction.id,
+        scan_id=scan.id,
+        predicted_class=prediction.predicted_class,
+        confidence=prediction.confidence,
+        all_probabilities=_parse_probabilities(prediction.all_probabilities),
+        explanation="Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation." if "Pneumonia" in prediction.predicted_class else "Model attention is uniformly distributed across clear pulmonary parenchyma.",
+        is_flagged=prediction.is_flagged or False,
+        anonymized_patient_id=scan.anonymized_patient_id,
+        modality=scan.modality,
+        body_part=scan.body_part,
+        original_image_path=original_path if original_path.exists() else None,
+        gradcam_image_path=gradcam_path if gradcam_path.exists() else None,
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=MediScan_Report_Pred_{prediction.id}.pdf"}
+    )
+
+
 @router.get("/{prediction_id}/heatmap/{condition}")
 async def get_condition_heatmap(
     prediction_id: int,

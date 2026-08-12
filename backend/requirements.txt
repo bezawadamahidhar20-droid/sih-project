@@ -22,5 +22,8 @@ httpx==0.28.1
 python-json-logger==4.1.0
 # Data-prep script (app/models/prepare_data.py) — was missing entirely.
 pyarrow==25.0.0
+reportlab>=4.0.0
+matplotlib>=3.8.0
+scikit-learn>=1.4.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
