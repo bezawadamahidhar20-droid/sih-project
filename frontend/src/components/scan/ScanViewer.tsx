@@ -114,8 +114,8 @@ export function ScanViewer({
     >
       {/* Toolbar */}
       <Stack
-        direction="row"
-        sx={{ alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1, bgcolor: '#101f2c', borderBottom: '1px solid #1c2b38' }}
+        direction={{ xs: 'column', sm: 'row' }}
+        sx={{ alignItems: { xs: 'flex-start', sm: 'center' }, justifyContent: 'space-between', px: 2, py: 1, bgcolor: '#101f2c', borderBottom: '1px solid #1c2b38', gap: 1, flexWrap: 'wrap' }}
       >
         <ToggleButtonGroup
           size="small"
