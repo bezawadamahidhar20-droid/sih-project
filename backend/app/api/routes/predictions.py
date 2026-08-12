@@ -298,12 +298,30 @@ def _to_prediction_response(
     gradcam_url: Optional[str] = None,
     scan: Optional[Scan] = None,
 ) -> PredictionResponse:
+    probs = _parse_probabilities(prediction.all_probabilities)
+    findings = [
+        {
+            "condition": cond,
+            "confidence": prob,
+            "is_present": prob >= 0.4,
+            "severity": "high" if prob >= 0.75 else "moderate" if prob >= 0.4 else "low",
+        }
+        for cond, prob in probs.items()
+    ]
+    condition_heatmaps = (
+        {cond: f"/api/v1/predictions/{prediction.id}/heatmap/{cond}" for cond in probs.keys()}
+        if gradcam_url
+        else None
+    )
+
     return PredictionResponse(
         id=prediction.id,
         scan_id=prediction.scan_id,
         predicted_class=prediction.predicted_class,
         confidence=prediction.confidence,
-        all_probabilities=_parse_probabilities(prediction.all_probabilities),
+        all_probabilities=probs,
+        findings=findings,
+        condition_heatmaps=condition_heatmaps,
         gradcam_url=gradcam_url,
         processing_time_ms=prediction.processing_time_ms,
         model_version=prediction.model_version,
@@ -444,6 +462,32 @@ async def flag_prediction(
     )
 
     return _to_prediction_response(prediction, _gradcam_url(prediction), scan)
+
+
+@router.get("/{prediction_id}/heatmap/{condition}")
+async def get_condition_heatmap(
+    prediction_id: int,
+    condition: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    query = (
+        select(Prediction)
+        .where(Prediction.id == prediction_id)
+        .options(selectinload(Prediction.scan))
+    )
+    result = await db.execute(query)
+    prediction = result.scalar_one_or_none()
+    if not prediction:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    if current_user.role == UserRole.STAFF and prediction.scan.uploaded_by != current_user.id:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+
+    gradcam_file = f"gradcam_{prediction.scan.file_hash}.png"
+    gradcam_path = Path(settings.gradcam_dir) / gradcam_file
+    if not gradcam_path.exists():
+        raise HTTPException(status_code=404, detail="Condition heatmap image not found")
+    return FileResponse(path=gradcam_path, media_type="image/png")
 
 
 async def _scan_for_image(db: AsyncSession, filename: str) -> Optional[Scan]:

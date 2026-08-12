@@ -41,12 +41,21 @@ export interface Scan {
   thumbnail_url?: string | null;
 }
 
+export interface PredictionFinding {
+  condition: string;
+  confidence: number;
+  is_present?: boolean;
+  severity?: string;
+}
+
 export interface Prediction {
   id: number;
   scan_id: number;
   predicted_class: string;
   confidence: number;
   all_probabilities: Record<string, number>;
+  findings?: PredictionFinding[];
+  condition_heatmaps?: Record<string, string> | null;
   gradcam_url: string | null;
   processing_time_ms: number | null;
   model_version: string;

@@ -298,6 +298,7 @@ export function ResultsPage() {
             isHighRisk={pred.is_high_risk}
             isFlagged={pred.is_flagged}
             decisionThreshold={pred.model_decision_threshold}
+            findings={pred.findings}
           />
           {safetyVariant !== 'normal' && (
             <ClinicalSafetyBanner variant={safetyVariant} subMessage={result.warning ?? undefined} />

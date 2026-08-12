@@ -84,6 +84,7 @@ export function VerdictHero({
   isFlagged,
   decisionThreshold,
   normalClass = 'Normal',
+  findings,
 }: VerdictHeroProps) {
   const isNormal = predictedClass === normalClass;
   const abnormal = !isNormal;
@@ -161,7 +162,7 @@ export function VerdictHero({
           </Stack>
 
           <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: '0.12em' }}>
-            AI-assisted finding
+            AI-assisted multi-label finding
           </Typography>
           <Typography
             variant="h2"
@@ -175,6 +176,22 @@ export function VerdictHero({
           >
             {predictedClass}
           </Typography>
+
+          {/* Multi-label findings chips */}
+          {findings && findings.length > 0 && (
+            <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', gap: 0.75 }}>
+              {findings.map((f) => (
+                <Chip
+                  key={f.condition}
+                  size="small"
+                  label={`${f.condition}: ${Math.round(f.confidence * 100)}%`}
+                  color={f.confidence >= 0.75 ? 'error' : f.confidence >= 0.4 ? 'warning' : 'default'}
+                  variant={f.confidence >= 0.4 ? 'filled' : 'outlined'}
+                  sx={{ fontWeight: 600 }}
+                />
+              ))}
+            </Stack>
+          )}
 
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, maxWidth: 560, lineHeight: 1.7 }}>
             {isLowConfidence
