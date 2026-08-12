@@ -189,11 +189,102 @@ def _run_eval(args, device):
     out.write_text(json.dumps(result, indent=2))
     print(f"[eval] Results written to {out}")
 
+    # Save to results/ folder as markdown report and matplotlib charts (step 1 requirement)
+    _save_results_markdown_and_chart(result, Path("results"))
+    _save_results_markdown_and_chart(result, Path("../results"))
+
     # ---- Grad-CAM examples (XAI, roadmap step 2) ----
     if args.examples > 0:
         _generate_examples(args, device, test_ds, model, target_layer, test_ds.class_names)
 
     return metrics
+
+
+def _save_results_markdown_and_chart(results: dict, results_dir: Path) -> None:
+    try:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        m = results["metrics"]
+        cm = results["confusion_matrix"]["matrix"]
+        
+        md_content = f"""# MediScan AI — Clinical Model Evaluation Report
+
+**Model Architecture**: {results.get('engine', 'resnet50').upper()} (Transfer Learning)  
+**Evaluated Dataset**: Real Kaggle Chest X-Ray Hold-Out Test Set ({results.get('num_samples', 624)} samples)  
+**Positive (Abnormal) Class**: {results.get('positive_class', 'Pneumonia')}  
+
+---
+
+## 📊 Summary Metrics
+
+| Clinical Metric | Score | Percentage |
+| :--- | :--- | :--- |
+| **Accuracy** | `{m['accuracy']:.4f}` | **{m['accuracy']*100:.2f}%** |
+| **Balanced Accuracy** | `{m['balanced_accuracy']:.4f}` | **{m['balanced_accuracy']*100:.2f}%** |
+| **Sensitivity (Recall)** | `{m['sensitivity']:.4f}` | **{m['sensitivity']*100:.2f}%** |
+| **Specificity** | `{m['specificity']:.4f}` | **{m['specificity']*100:.2f}%** |
+| **Precision** | `{m['precision']:.4f}` | **{m['precision']*100:.2f}%** |
+| **F1 Score** | `{m['f1']:.4f}` | **{m['f1']*100:.2f}%** |
+| **ROC AUC** | `{m['auc']:.4f}` | **{m['auc']*100:.2f}%** |
+
+---
+
+## 📉 Confusion Matrix
+
+| Actual \\ Predicted | Predicted NORMAL | Predicted PNEUMONIA | Total |
+| :--- | :--- | :--- | :--- |
+| **Actual NORMAL** | **{cm[0][0]}** (True Negatives) | **{cm[0][1]}** (False Positives) | {cm[0][0] + cm[0][1]} |
+| **Actual PNEUMONIA** | **{cm[1][0]}** (False Negatives) | **{cm[1][1]}** (True Positives) | {cm[1][0] + cm[1][1]} |
+
+---
+
+## 📸 Generated Confusion Matrix Chart
+![Confusion Matrix](confusion_matrix.png)
+"""
+        (results_dir / "evaluation_report.md").write_text(md_content, encoding="utf-8")
+        print(f"[eval] Saved markdown report -> {results_dir / 'evaluation_report.md'}")
+
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(6, 5))
+        cax = ax.matshow(cm, cmap='Blues')
+        fig.colorbar(cax)
+        
+        classes = results["confusion_matrix"]["true_class"]
+        ax.set_xticks([0, 1])
+        ax.set_yticks([0, 1])
+        ax.set_xticklabels(classes)
+        ax.set_yticklabels(classes)
+        
+        for i in range(2):
+            for j in range(2):
+                ax.text(j, i, str(cm[i][j]), va='center', ha='center', color='white' if cm[i][j] > 150 else 'black', fontsize=14, fontweight='bold')
+                
+        plt.title('MediScan AI Confusion Matrix', pad=20)
+        plt.xlabel('Predicted Label')
+        plt.ylabel('True Label')
+        plt.tight_layout()
+        plt.savefig(results_dir / "confusion_matrix.png", dpi=150)
+        plt.close()
+
+        fig, ax = plt.subplots(figsize=(8, 4.5))
+        metrics_names = ['Sensitivity', 'Specificity', 'Precision', 'Accuracy', 'ROC AUC']
+        metrics_vals = [m['sensitivity']*100, m['specificity']*100, m['precision']*100, m['accuracy']*100, m['auc']*100]
+        colors = ['#10B981', '#00B4D8', '#6366F1', '#8B5CF6', '#EC4899']
+        
+        bars = ax.bar(metrics_names, metrics_vals, color=colors, width=0.55)
+        ax.set_ylim(0, 105)
+        ax.set_ylabel('Percentage (%)')
+        ax.set_title('MediScan AI ResNet50 Clinical Metrics')
+        
+        for bar in bars:
+            yval = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2.0, yval + 1.5, f"{yval:.1f}%", ha='center', va='bottom', fontweight='bold')
+            
+        plt.tight_layout()
+        plt.savefig(results_dir / "metrics_chart.png", dpi=150)
+        plt.close()
+        print(f"[eval] Saved charts -> {results_dir / 'confusion_matrix.png'} and {results_dir / 'metrics_chart.png'}")
+    except Exception as e:
+        print(f"[eval] Results generation note: {e}")
 
 
 def _confusion_matrix_rows(y_true: np.ndarray, y_pred: np.ndarray, n: int) -> List[List[int]]:
