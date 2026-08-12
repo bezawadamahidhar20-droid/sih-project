@@ -21,6 +21,7 @@ import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import ChevronLeftRoundedIcon from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded';
 import LocalHospitalRoundedIcon from '@mui/icons-material/LocalHospitalRounded';
+import MonitorHeartRoundedIcon from '@mui/icons-material/MonitorHeartRounded';
 import CircleIcon from '@mui/icons-material/Circle';
 import { useAuth } from '../../context/AuthContext';
 import { UserRole } from '../../types';
@@ -42,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Patients', to: '/patients', icon: <GroupRoundedIcon />, roles: ['doctor', 'radiologist'] },
   { label: 'Review Queue', to: '/review', icon: <FlagRoundedIcon />, roles: ['doctor', 'radiologist'] },
   { label: 'Audit Logs', to: '/audit-logs', icon: <FactCheckRoundedIcon />, roles: ['doctor', 'radiologist'] },
+  { label: 'Model Performance', to: '/model-performance', icon: <MonitorHeartRoundedIcon />, roles: ['doctor', 'radiologist'] },
   { label: 'Settings', to: '/settings', icon: <SettingsRoundedIcon /> },
 ];
 

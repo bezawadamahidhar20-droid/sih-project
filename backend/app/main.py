@@ -10,7 +10,7 @@ import logging
 from app.core.config import get_settings
 from app.core.logging import setup_logging, get_logger
 from app.db.session import init_db, close_db
-from app.api.routes import auth, scans, predictions, health
+from app.api.routes import auth, scans, predictions, health, model
 from app.db.models import UserRole
 
 settings = get_settings()
@@ -109,6 +109,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(scans.router, prefix="/api/v1")
 app.include_router(predictions.router, prefix="/api/v1")
+app.include_router(model.router, prefix="/api/v1")
 
 
 @app.get("/")

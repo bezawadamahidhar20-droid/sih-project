@@ -452,6 +452,16 @@ class ApiService {
       return DEMO_HEALTH;
     }
   }
+  async getModelMetrics(): Promise<unknown> {
+    const response = await this.client.get('/model/metrics');
+    return response.data;
+  }
+
+  async getModelChart(name: string): Promise<string> {
+    // Returns a blob URL for the chart image
+    const response = await this.client.get(`/model/metrics/chart/${name}`, { responseType: 'blob' });
+    return URL.createObjectURL(response.data);
+  }
 }
 
 export const api = new ApiService();

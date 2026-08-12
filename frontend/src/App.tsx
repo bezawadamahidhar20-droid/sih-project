@@ -14,6 +14,7 @@ import { PatientsPage } from './pages/PatientsPage';
 import { PatientHistoryPage } from './pages/PatientHistoryPage';
 import { ReviewQueuePage } from './pages/ReviewQueuePage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
+import { ModelPerformancePage } from './pages/ModelPerformancePage';
 import { SettingsPage } from './pages/SettingsPage';
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="/review" element={<PrivateRoute><ReviewQueuePage /></PrivateRoute>} />
               <Route path="/audit-logs" element={<PrivateRoute><AuditLogsPage /></PrivateRoute>} />
               <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+              <Route path="/model-performance" element={<PrivateRoute><ModelPerformancePage /></PrivateRoute>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
