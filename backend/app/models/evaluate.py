@@ -119,13 +119,10 @@ def _run_eval(args, device):
 
     print(f"[eval] Test samples: {len(test_ds)}  classes: {test_ds.class_names}")
 
-    if args.positive_class not in test_ds.class_names:
-        raise SystemExit(
-            f"--positive-class '{args.positive_class}' not found in dataset classes "
-            f"{test_ds.class_names}. Use --positive-class to select the abnormal class."
-        )
-    positive_index = test_ds.class_names.index(args.positive_class)
-    print(f"[eval] Positive (abnormal) class: '{args.positive_class}' at index {positive_index}")
+    from app.models.data import resolve_positive_index
+    positive_index = resolve_positive_index(args.positive_class, test_ds.class_names)
+    print(f"[eval] Positive (abnormal) class: "
+          f"'{test_ds.class_names[positive_index]}' at index {positive_index}")
 
     all_probs: List[np.ndarray] = []
     all_labels: List[int] = []

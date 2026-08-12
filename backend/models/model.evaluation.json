@@ -5,39 +5,39 @@
     "NORMAL",
     "PNEUMONIA"
   ],
-  "positive_class": "PNEUMONIA",
+  "positive_class": "Pneumonia",
   "metrics": {
-    "accuracy": 0.842948717948718,
-    "balanced_accuracy": 0.8008547008547009,
-    "precision": 0.8146551724137931,
-    "sensitivity": 0.9692307692307692,
-    "recall": 0.9692307692307692,
-    "specificity": 0.6324786324786325,
-    "f1": 0.8852459016393442,
-    "auc": 0.9446635985097542,
-    "true_positive": 378,
-    "false_negative": 12,
-    "false_positive": 86,
-    "true_negative": 148,
+    "accuracy": 0.8685897435897436,
+    "balanced_accuracy": 0.8367521367521368,
+    "precision": 0.8468468468468469,
+    "sensitivity": 0.9641025641025641,
+    "recall": 0.9641025641025641,
+    "specificity": 0.7094017094017094,
+    "f1": 0.9016786570743407,
+    "auc": 0.9460113960113982,
+    "true_positive": 376,
+    "false_negative": 14,
+    "false_positive": 68,
+    "true_negative": 166,
     "support": 624
   },
   "per_class": {
     "NORMAL": {
-      "precision": 0.925,
-      "recall": 0.6324786324786325,
-      "f1": 0.751269035532995,
+      "precision": 0.9222222222222223,
+      "recall": 0.7094017094017094,
+      "f1": 0.8019323671497586,
       "support": 234
     },
     "PNEUMONIA": {
-      "precision": 0.8146551724137931,
-      "recall": 0.9692307692307692,
-      "f1": 0.8852459016393442,
+      "precision": 0.8468468468468469,
+      "recall": 0.9641025641025641,
+      "f1": 0.9016786570743407,
       "support": 390
     },
     "macro_avg": {
-      "precision": 0.8698275862068966,
-      "recall": 0.8008547008547009,
-      "f1": 0.8182574685861697
+      "precision": 0.8845345345345346,
+      "recall": 0.8367521367521368,
+      "f1": 0.8518055121120496
     }
   },
   "confusion_matrix": {
@@ -51,12 +51,12 @@
     ],
     "matrix": [
       [
-        148,
-        86
+        166,
+        68
       ],
       [
-        12,
-        378
+        14,
+        376
       ]
     ]
   }

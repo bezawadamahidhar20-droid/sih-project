@@ -56,6 +56,8 @@ export interface Prediction {
   is_flagged: boolean;
   flagged_by: number | null;
   flagged_at: string | null;
+  /** Calibrated decision boundary in effect for this prediction (0.5 = argmax). */
+  model_decision_threshold?: number | null;
   scan: Scan | null;
   created_at: string;
 }
@@ -82,6 +84,17 @@ export interface PredictionListResponse {
   page_size: number;
 }
 
+export interface ModelMetrics {
+  num_samples?: number | null;
+  accuracy?: number | null;
+  balanced_accuracy?: number | null;
+  sensitivity?: number | null;
+  specificity?: number | null;
+  precision?: number | null;
+  auc?: number | null;
+  class_names?: string[];
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -90,6 +103,10 @@ export interface HealthResponse {
   device: string;
   model_path?: string;
   heuristic_fallback_active?: boolean;
+  /** Calibrated decision boundary for the abnormal class (0.5 = argmax). */
+  model_decision_threshold?: number | null;
+  /** Real hold-out validation metrics from <model>.evaluation.json. */
+  model_metrics?: ModelMetrics | null;
 }
 
 export interface ApiError {

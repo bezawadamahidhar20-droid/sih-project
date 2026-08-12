@@ -18,6 +18,7 @@ export function AuthImage({ src, alt = 'scan image', objectFit = 'contain', sx }
 
   useEffect(() => {
     let cancelled = false;
+    let inFlightUrl: string | null = null;
     if (!src) {
       setObjectUrl(null);
       setStatus('idle');
@@ -27,7 +28,13 @@ export function AuthImage({ src, alt = 'scan image', objectFit = 'contain', sx }
     api
       .fetchImageBlob(src)
       .then((url) => {
-        if (cancelled) return;
+        inFlightUrl = url;
+        if (cancelled) {
+          // Unmounted mid-flight: revoke the blob URL we just created so it
+          // cannot leak in a long-lived history grid.
+          if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+          return;
+        }
         if (revokeRef.current && revokeRef.current.startsWith('blob:')) {
           URL.revokeObjectURL(revokeRef.current);
         }
@@ -40,6 +47,9 @@ export function AuthImage({ src, alt = 'scan image', objectFit = 'contain', sx }
       });
     return () => {
       cancelled = true;
+      if (inFlightUrl && inFlightUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(inFlightUrl);
+      }
     };
   }, [src]);
 

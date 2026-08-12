@@ -1,6 +1,6 @@
 from collections import defaultdict
 from time import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from app.api.schemas import (
     UserCreate, UserResponse, UserUpdate, UserSelfUpdate, ChangePasswordRequest,
     Token, LoginRequest, RefreshTokenRequest,
 )
+from app.core.netutil import client_ip
 from app.core.security import (
     verify_password, get_password_hash,
     create_access_token, create_refresh_token, decode_token
@@ -34,17 +35,61 @@ _LOGIN_FAILURES: Dict[str, List[float]] = defaultdict(list)
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 15 * 60  # 15 minutes
 
+# One-time-use refresh tokens (rotation): jti -> expiry epoch. In-memory like
+# the login limiter — adequate for the single-worker stack; swap for Redis
+# when scaling horizontally. Bounded below by expiring + a hard cap.
+_CONSUMED_REFRESH_JTIS: Dict[str, float] = {}
+_MAX_CONSUMED_JTIS = 10_000
+
+# Precomputed bcrypt hash used to equalize response timing when the username
+# does not exist, so account existence cannot be probed by latency.
+_DUMMY_HASH = get_password_hash("timing-equalization-dummy-value")
+
 
 def _rate_limit_key(request: Request, username: str) -> str:
-    client_ip = request.client.host if request.client else "unknown"
-    return f"{client_ip}:{username.lower()}"
+    # Uses the proxy-aware client IP (nginx X-Forwarded-For) so all requests
+    # behind the reverse proxy are NOT treated as one shared client — five
+    # failed attempts from one attacker can no longer lock out a real user.
+    return f"{client_ip(request)}:{username.lower()}"
+
+
+def _prune_login_failures(now: float) -> None:
+    """Drop keys that have gone quiet so random-username floods cannot grow
+    the store without bound (keys are normally pruned on re-check only)."""
+    for stale in [
+        k for k, v in _LOGIN_FAILURES.items()
+        if not v or now - v[-1] >= LOGIN_WINDOW_SECONDS
+    ]:
+        _LOGIN_FAILURES.pop(stale, None)
 
 
 def _login_blocked(key: str) -> bool:
     now = time()
     recent = [t for t in _LOGIN_FAILURES[key] if now - t < LOGIN_WINDOW_SECONDS]
     _LOGIN_FAILURES[key] = recent
+    _prune_login_failures(now)
     return len(recent) >= LOGIN_MAX_ATTEMPTS
+
+
+def _consume_refresh_jti(payload: Dict[str, Any]) -> None:
+    """Mark a refresh token's jti as used (one-time rotation)."""
+    jti = payload.get("jti")
+    if not jti:
+        return
+    now = time()
+    for stale in [k for k, exp in _CONSUMED_REFRESH_JTIS.items() if exp <= now]:
+        _CONSUMED_REFRESH_JTIS.pop(stale, None)
+    if len(_CONSUMED_REFRESH_JTIS) >= _MAX_CONSUMED_JTIS:
+        # Stay bounded without wiping recent entries (a full clear would
+        # reopen a replay window for already-consumed tokens): drop the half
+        # with the oldest expiry.
+        oldest = sorted(_CONSUMED_REFRESH_JTIS.items(), key=lambda kv: kv[1])[
+            : len(_CONSUMED_REFRESH_JTIS) // 2
+        ]
+        for key, _ in oldest:
+            _CONSUMED_REFRESH_JTIS.pop(key, None)
+    exp = payload.get("exp")
+    _CONSUMED_REFRESH_JTIS[jti] = float(exp) if isinstance(exp, (int, float)) else now + LOGIN_WINDOW_SECONDS
 
 
 def _register_login_failure(key: str) -> None:
@@ -105,7 +150,23 @@ async def login(
     result = await db.execute(select(User).where(User.username == credentials.username))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(credentials.password, user.hashed_password):
+    if not user:
+        # Equalize response timing: run bcrypt against a dummy hash so a
+        # nonexistent username is not distinguishable from a wrong password
+        # by request latency (~250ms bcrypt vs. near-instant miss).
+        verify_password(credentials.password, _DUMMY_HASH)
+        _register_login_failure(key)
+        audit_logger.log_auth(
+            "login", username=credentials.username, success=False,
+            ip_address=request.client.host if request.client else None,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not verify_password(credentials.password, user.hashed_password):
         _register_login_failure(key)
         audit_logger.log_auth(
             "login", username=credentials.username, success=False,
@@ -127,8 +188,12 @@ async def login(
     user.last_login = utcnow()
     await db.commit()
 
-    access_token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
-    refresh_token = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
+    access_token = create_access_token(
+        data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    )
+    refresh_token = create_refresh_token(
+        data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    )
 
     audit_logger.log_auth("login", user_id=str(user.id), username=user.username, success=True)
 
@@ -152,8 +217,29 @@ async def refresh_token(
             detail="Invalid refresh token"
         )
 
-    user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    # Rotation: each refresh token is single-use. The consumed check AND the
+    # mark happen back-to-back with NO await in between, so two concurrent
+    # refreshes with the same token cannot both pass (burn-then-verify: a
+    # failed follow-up can never be replayed anyway). Legacy tokens without a
+    # jti are accepted once.
+    jti = payload.get("jti")
+    if jti:
+        if jti in _CONSUMED_REFRESH_JTIS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token already used"
+            )
+        _consume_refresh_jti(payload)
+
+    try:
+        user_id = int(payload.get("sub") or "")
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user or not user.is_active:
@@ -162,8 +248,19 @@ async def refresh_token(
             detail="User not found or inactive"
         )
 
-    access_token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
-    new_refresh_token = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
+    # Revocation: tokens minted before the last password/role change are dead.
+    if (payload.get("ver") or 0) != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token revoked — please sign in again"
+        )
+
+    access_token = create_access_token(
+        data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    )
+    new_refresh_token = create_refresh_token(
+        data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    )
 
     return {
         "access_token": access_token,
@@ -216,6 +313,8 @@ async def change_password(
         )
 
     current_user.hashed_password = get_password_hash(request.new_password)
+    # Revoke every outstanding access/refresh token issued before this point.
+    current_user.token_version = (current_user.token_version or 0) + 1
     await db.commit()
 
     audit_logger.log_auth(
@@ -262,6 +361,22 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     update_data = user_update.model_dump(exclude_unset=True)
+
+    # Self-protection: nobody can change their own role or active status
+    # through this endpoint (a doctor must not be able to deactivate
+    # themselves or the other privileged users).
+    if user.id == current_user.id and (
+        "role" in update_data or "is_active" in update_data
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own role or active status"
+        )
+
+    if "role" in update_data or "is_active" in update_data:
+        # Privilege/status change: revoke the target user's sessions.
+        user.token_version = (user.token_version or 0) + 1
+
     for field, value in update_data.items():
         setattr(user, field, value)
 

@@ -2,6 +2,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from app.core.security import create_refresh_token
+from app.api.routes.auth import LOGIN_MAX_ATTEMPTS
 
 # Fixtures (client, test_user, test_staff, auth_headers, staff_headers,
 # db_session, setup_db) are provided by tests/conftest.py.
@@ -19,7 +20,9 @@ class TestHealth:
         # and must NOT be silently running the dev-only heuristic engine.
         assert data["model_loaded"] is True
         assert data["engine"] != "baseline-heuristic"
-        assert "model_path" in data
+        # model_path was removed from the public health payload (no internal
+        # path disclosure on an unauthenticated endpoint).
+        assert "model_path" not in data
         assert data["heuristic_fallback_active"] is False
 
 
@@ -112,6 +115,82 @@ class TestAuth:
             json={"username": "testuser", "password": "newpass123"},
         )
         assert new.status_code == 200
+
+
+class TestRefreshRotation:
+    async def test_refresh_token_is_single_use(self, client: AsyncClient, test_user):
+        refresh_token = create_refresh_token(
+            data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
+        )
+        first = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+        )
+        assert first.status_code == 200
+
+        # Replaying the same (now consumed) refresh token must be rejected.
+        replay = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+        )
+        assert replay.status_code == 401
+
+    async def test_refresh_issues_new_token_chain(self, client: AsyncClient, test_user):
+        refresh_token = create_refresh_token(
+            data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
+        )
+        r1 = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+        )
+        assert r1.status_code == 200
+        # The freshly issued refresh token rotates forward.
+        r2 = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": r1.json()["refresh_token"]}
+        )
+        assert r2.status_code == 200
+
+    async def test_password_change_revokes_outstanding_tokens(
+        self, client: AsyncClient, test_user, auth_headers
+    ):
+        old_access = auth_headers["Authorization"]
+        resp = await client.post(
+            "/api/v1/auth/change-password",
+            json={"current_password": "testpass123", "new_password": "newpass123"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 204
+
+        # The token issued before the password change is now revoked.
+        me = await client.get("/api/v1/auth/me", headers={"Authorization": old_access})
+        assert me.status_code == 401
+
+
+class TestLoginLockout:
+    async def test_lockout_keyed_by_proxy_client_ip(self, client: AsyncClient):
+        # Regression: behind the nginx proxy every request shares one socket IP,
+        # so the limiter must key on X-Forwarded-For — otherwise five failures
+        # from the shared proxy IP would lock real users out.
+        attacker_headers = {"X-Forwarded-For": "203.0.113.9"}
+        for _ in range(LOGIN_MAX_ATTEMPTS):
+            r = await client.post(
+                "/api/v1/auth/login",
+                json={"username": "victim", "password": "wrongpass"},
+                headers=attacker_headers,
+            )
+            assert r.status_code == 401
+
+        blocked = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "victim", "password": "wrongpass"},
+            headers=attacker_headers,
+        )
+        assert blocked.status_code == 429
+
+        # A different client IP is not affected by the attacker's failures.
+        other = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "victim", "password": "wrongpass"},
+            headers={"X-Forwarded-For": "203.0.113.10"},
+        )
+        assert other.status_code == 401
 
 
 class TestScans:

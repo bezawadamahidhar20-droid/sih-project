@@ -77,6 +77,13 @@ def parse_args() -> argparse.Namespace:
                    help="Early stopping after N epochs without improvement")
     p.add_argument("--positive-class", type=str, default="Pneumonia",
                    help="Class treated as 'abnormal' for sensitivity-based model selection")
+    p.add_argument("--selection-metric", type=str, default="sensitivity",
+                   choices=["sensitivity", "balanced_accuracy"],
+                   help="Metric used to pick the best checkpoint. 'sensitivity' "
+                        "minimizes false negatives (roadmap default); "
+                        "'balanced_accuracy' trades sensitivity for specificity, "
+                        "avoiding over-prediction of the abnormal class "
+                        "out-of-distribution.")
     p.add_argument("--device", type=str, default=None,
                    help="torch device (default: cuda if available, else cpu)")
     p.add_argument("--output", type=str, default="./models/model.pth",
@@ -254,13 +261,10 @@ def main() -> None:
           f"{dict(zip(train_ds.class_names, [orig_counts.get(i, 0) for i in range(len(train_ds.class_names))]))}")
 
     # Resolve which class index is the 'abnormal' (positive) class.
-    if args.positive_class not in train_ds.class_names:
-        raise SystemExit(
-            f"--positive-class '{args.positive_class}' not found in dataset classes "
-            f"{train_ds.class_names}. Use --positive-class to select the abnormal class."
-        )
-    positive_index = train_ds.class_names.index(args.positive_class)
-    print(f"[train] Positive (abnormal) class: '{args.positive_class}' at index {positive_index}")
+    from app.models.data import resolve_positive_index
+    positive_index = resolve_positive_index(args.positive_class, train_ds.class_names)
+    print(f"[train] Positive (abnormal) class: "
+          f"'{train_ds.class_names[positive_index]}' at index {positive_index}")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                               num_workers=0, drop_last=False)
@@ -340,8 +344,11 @@ def main() -> None:
                                  positive_index=positive_index)
         report = multiclass_report(y_true, y_pred, train_ds.class_names)
 
-        # Model selection metric: sensitivity (recall of abnormal class).
-        score = metrics["sensitivity"]
+        # Model selection metric: sensitivity (recall of abnormal class) by
+        # default; balanced accuracy when asked — sensitivity-only selection
+        # can drift into an over-confident 'always abnormal' boundary that
+        # generalizes poorly to real-world (out-of-distribution) scans.
+        score = metrics[args.selection_metric]
         elapsed = time.time() - t0
         print(
             f"[epoch {epoch:02d}/{args.epochs}] train_loss={running_loss / max(n_batches, 1):.4f} "
@@ -370,7 +377,7 @@ def main() -> None:
                 "positive_class": args.positive_class,
                 "device": str(device),
                 "best_epoch": epoch,
-                "selection_metric": "sensitivity",
+                "selection_metric": args.selection_metric,
                 "best_metrics": metrics,
                 "per_class": report,
                 "history": history,
@@ -387,7 +394,7 @@ def main() -> None:
                 print(f"[train] Early stopping after {epochs_no_improve} epochs without improvement")
                 break
 
-    print(f"[train] Done. Best validation sensitivity: {best_score:.4f}")
+    print(f"[train] Done. Best validation {args.selection_metric}: {best_score:.4f}")
 
 
 if __name__ == "__main__":

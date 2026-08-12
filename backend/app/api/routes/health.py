@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -12,6 +15,31 @@ settings = get_settings()
 router = APIRouter(prefix="/health", tags=["health"])
 
 
+def _load_model_metrics() -> dict:
+    """Read the validated evaluation report (``<model>.evaluation.json``)
+    written by ``app.models.evaluate``, if present, so the UI can show real
+    hold-out metrics (accuracy, sensitivity, ...) instead of invented ones.
+    """
+    try:
+        eval_path = Path(settings.model_path).with_suffix(".evaluation.json")
+        if not eval_path.exists():
+            return {}
+        data = json.loads(eval_path.read_text(encoding="utf-8"))
+        metrics = data.get("metrics") or {}
+        return {
+            "num_samples": data.get("num_samples"),
+            "accuracy": metrics.get("accuracy"),
+            "balanced_accuracy": metrics.get("balanced_accuracy"),
+            "sensitivity": metrics.get("sensitivity"),
+            "specificity": metrics.get("specificity"),
+            "precision": metrics.get("precision"),
+            "auc": metrics.get("auc"),
+            "class_names": data.get("class_names") or [],
+        }
+    except Exception:
+        return {}
+
+
 @router.get("", response_model=HealthResponse)
 async def health_check():
     model_service = get_model_service()
@@ -22,8 +50,13 @@ async def health_check():
         model_loaded=model_service.is_model_loaded,
         engine=model_service.engine,
         device=model_service.device,
-        model_path=settings.model_path,
         heuristic_fallback_active=model_service.heuristic_fallback_active,
+        model_decision_threshold=(
+            settings.model_decision_threshold
+            if model_service.is_model_loaded and settings.model_num_classes == 2
+            else None
+        ),
+        model_metrics=_load_model_metrics() if model_service.is_model_loaded else None,
     )
 
 

@@ -17,6 +17,8 @@ from typing import Dict, List, Optional
 
 from fastapi import HTTPException, Request, status
 
+from app.core.netutil import client_ip
+
 _windows: Dict[str, List[float]] = defaultdict(list)
 
 
@@ -30,24 +32,27 @@ class SlidingWindowRateLimiter:
         self.window_seconds = window_seconds
         self.scope = scope
         self.settings_key = settings_key
+        self._checks = 0
 
     def _limit(self) -> int:
         from app.core.config import get_settings
         return max(1, int(getattr(get_settings(), self.settings_key)))
 
     def _key(self, request: Request, user_id: Optional[int]) -> str:
-        client_ip = request.client.host if request.client else "unknown"
-        return f"{self.scope}:{client_ip}:{user_id or 'anon'}"
+        return f"{self.scope}:{client_ip(request)}:{user_id or 'anon'}"
 
     def check(self, request: Request, user_id: Optional[int]) -> None:
         now = time()
         key = self._key(request, user_id)
-        # Prune this key's stale entries; also drop keys that have gone quiet
-        # so the global store cannot grow without bound.
+        # Prune this key's stale entries every call; sweep the global store
+        # only occasionally so a busy server does not pay an O(keys) scan on
+        # every single request while still keeping memory bounded.
         recent = [t for t in _windows[key] if now - t < self.window_seconds]
         _windows[key] = recent
-        for stale in [k for k, v in _windows.items() if not v or now - v[-1] >= self.window_seconds]:
-            _windows.pop(stale, None)
+        self._checks += 1
+        if self._checks % 100 == 0:
+            for stale in [k for k, v in _windows.items() if not v or now - v[-1] >= self.window_seconds]:
+                _windows.pop(stale, None)
 
         if len(recent) >= self._limit():
             raise HTTPException(

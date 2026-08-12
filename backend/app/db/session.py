@@ -38,6 +38,30 @@ async def get_db() -> AsyncSession:
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migration for pre-existing databases: create_all never
+        # adds columns to tables that already exist, so add the new
+        # token_version column explicitly when missing.
+        if settings.database_url.startswith("sqlite"):
+            from sqlalchemy import inspect, text
+
+            def _ensure_token_version(sync_conn) -> None:
+                columns = {c["name"] for c in inspect(sync_conn).get_columns("users")}
+                if "token_version" not in columns:
+                    sync_conn.execute(
+                        text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+                    )
+
+            await conn.run_sync(_ensure_token_version)
+        else:
+            # Postgres supports ADD COLUMN IF NOT EXISTS natively.
+            from sqlalchemy import text
+
+            await conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                    "token_version INTEGER NOT NULL DEFAULT 0"
+                )
+            )
 
 
 async def close_db() -> None:

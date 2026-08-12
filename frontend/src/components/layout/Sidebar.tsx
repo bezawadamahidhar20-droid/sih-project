@@ -85,8 +85,10 @@ export function Sidebar({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: '#0b2338',
-        backgroundImage: 'linear-gradient(180deg, rgba(15,92,140,0.18) 0%, rgba(11,35,56,0) 32%)',
+        bgcolor: 'rgba(4,10,20,0.92)',
+        backgroundImage: 'linear-gradient(180deg, rgba(15,92,140,0.2) 0%, rgba(4,10,20,0) 40%)',
+        backdropFilter: 'blur(20px)',
+        borderRight: '1px solid rgba(111,179,224,0.12)',
         color: '#cfe0ea',
         transition: 'width .25s',
         overflow: 'hidden',
@@ -109,9 +111,9 @@ export function Sidebar({
             width: 38,
             height: 38,
             borderRadius: 2,
-            bgcolor: 'primary.main',
-            backgroundImage: 'linear-gradient(135deg, #3d80a8 0%, #0a3f60 100%)',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            background: 'linear-gradient(135deg, #3d80a8 0%, #0a3f60 100%)',
+            boxShadow: '0 4px 16px rgba(15,92,140,0.5), 0 0 20px rgba(61,128,168,0.25)',
+            border: '1px solid rgba(111,179,224,0.3)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -142,20 +144,19 @@ export function Sidebar({
             title={collapsed && variant === 'permanent' ? item.label : ''}
             placement="right"
           >
-            <ListItemButton
-              component={NavLink}
-              to={item.to}
-              end={item.to === '/'}
-              onClick={onClose}
-              sx={{
+            <Box component="div" sx={{ mb: 0.5 }}>
+              <ListItemButton
+                component={NavLink}
+                to={item.to}
+                end={item.to === '/'}
+                onClick={onClose}
+                sx={{
                 position: 'relative',
-                borderRadius: 2,
-                mb: 0.5,
-                minHeight: 42,
+                borderRadius: 2.5,
+                minHeight: 44,
                 justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start',
-                color: '#a9bece',
-                transition: 'background-color .18s, color .18s',
-                // Active indicator bar
+                color: '#8fa8be',
+                transition: 'all .22s cubic-bezier(0.16, 1, 0.3, 1)',
                 '&::before': {
                   content: '""',
                   position: 'absolute',
@@ -163,46 +164,57 @@ export function Sidebar({
                   top: '50%',
                   transform: 'translateY(-50%) scaleY(0)',
                   width: 3,
-                  height: 22,
-                  borderRadius: '0 3px 3px 0',
+                  height: 20,
+                  borderRadius: '0 4px 4px 0',
                   bgcolor: '#6fb3e0',
-                  transition: 'transform .2s',
+                  boxShadow: '0 0 12px rgba(111, 179, 224, 0.8)',
+                  transition: 'transform .2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                 },
                 '&.active': {
-                  bgcolor: 'rgba(61,128,168,0.25)',
-                  color: '#fff',
+                  bgcolor: 'rgba(61,128,168,0.2)',
+                  color: '#ffffff',
+                  boxShadow: 'inset 0 0 20px rgba(61,128,168,0.12)',
                   '&::before': { transform: 'translateY(-50%) scaleY(1)' },
                   '& .MuiListItemIcon-root': { color: '#6fb3e0' },
                 },
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.07)', color: '#e6f1f7' },
+                '&:hover': {
+                  bgcolor: 'rgba(255,255,255,0.07)',
+                  color: '#ffffff',
+                  transform: 'translateX(3px)',
+                },
+                '&:active': {
+                  transform: 'scale(0.97)',
+                },
               }}
-            >
-              <ListItemIcon
-                sx={{
-                  minWidth: 0,
-                  mr: collapsed && variant === 'permanent' ? 0 : 1.5,
-                  color: 'inherit',
-                  justifyContent: 'center',
-                  '& svg': { fontSize: 21 },
-                }}
               >
-                {item.icon}
-              </ListItemIcon>
-              {!(collapsed && variant === 'permanent') && (
-                <Typography
-                  variant="body2"
-                  sx={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'inherit' }}
-                  noWrap
+                <ListItemIcon
+                  sx={{
+                    minWidth: 0,
+                    mr: collapsed && variant === 'permanent' ? 0 : 1.5,
+                    color: 'inherit',
+                    justifyContent: 'center',
+                    transition: 'color .2s ease',
+                    '& svg': { fontSize: 21 },
+                  }}
                 >
-                  {item.label}
-                </Typography>
-              )}
-            </ListItemButton>
+                  {item.icon}
+                </ListItemIcon>
+                {!(collapsed && variant === 'permanent') && (
+                  <Typography
+                    variant="body2"
+                    sx={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: 'inherit' }}
+                    noWrap
+                  >
+                    {item.label}
+                  </Typography>
+                )}
+              </ListItemButton>
+            </Box>
           </Tooltip>
         ))}
       </List>
 
-      <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />
+      <Divider sx={{ borderColor: 'rgba(255,255,255,0.07)' }} />
 
       {/* AI engine status */}
       <Box sx={{ px: collapsed && variant === 'permanent' ? 1 : 2, py: 1.5 }}>
@@ -212,32 +224,32 @@ export function Sidebar({
           sx={{ alignItems: 'center', justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start' }}
         >
           <Box sx={{ position: 'relative', display: 'flex' }}>
-            <CircleIcon sx={{ fontSize: 9, color: aiOnline ? '#3ddc84' : '#e0574b' }} />
+            <CircleIcon sx={{ fontSize: 9, color: aiOnline ? '#3ddc84' : '#e05c5c' }} />
             {aiOnline && (
               <Box
                 sx={{
                   position: 'absolute',
                   inset: -3,
                   borderRadius: '50%',
-                  border: '1.5px solid rgba(61,220,132,0.55)',
+                  border: '1.5px solid rgba(61,220,132,0.6)',
                   animation: 'pulse 2s ease-out infinite',
                   '@keyframes pulse': {
                     '0%': { transform: 'scale(0.6)', opacity: 0.9 },
-                    '100%': { transform: 'scale(1.6)', opacity: 0 },
+                    '100%': { transform: 'scale(1.8)', opacity: 0 },
                   },
                 }}
               />
             )}
           </Box>
           {!(collapsed && variant === 'permanent') && (
-            <Typography variant="caption" sx={{ color: '#8fa4b3' }}>
+            <Typography variant="caption" sx={{ color: aiOnline ? '#3ddc84' : '#e05c5c', fontWeight: 600 }}>
               {aiOnline ? 'AI Engine Online' : 'AI Engine Offline'}
             </Typography>
           )}
         </Stack>
       </Box>
 
-      <Divider sx={{ borderColor: 'rgba(255,255,255,0.08)' }} />
+      <Divider sx={{ borderColor: 'rgba(255,255,255,0.07)' }} />
 
       {/* User */}
       <Box sx={{ p: collapsed && variant === 'permanent' ? 1 : 2 }}>
@@ -245,14 +257,24 @@ export function Sidebar({
           direction="row"
           spacing={1.25}
           onClick={() => navigate('/settings')}
-          sx={{ alignItems: 'center', justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start', cursor: 'pointer' }}
+          sx={{
+            alignItems: 'center',
+            justifyContent: collapsed && variant === 'permanent' ? 'center' : 'flex-start',
+            cursor: 'pointer',
+            borderRadius: 2.5,
+            p: 1,
+            transition: 'all 0.2s ease',
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.07)' },
+          }}
         >
           <Box
             sx={{
               width: 34,
               height: 34,
               borderRadius: '50%',
-              bgcolor: 'secondary.main',
+              background: 'linear-gradient(135deg, #3d80a8 0%, #0f9c8f 100%)',
+              boxShadow: '0 0 12px rgba(61,128,168,0.45)',
+              border: '1.5px solid rgba(111,179,224,0.4)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -266,10 +288,10 @@ export function Sidebar({
           </Box>
           {!(collapsed && variant === 'permanent') && (
             <Box sx={{ overflow: 'hidden' }}>
-              <Typography variant="body2" sx={{ color: '#fff', fontWeight: 600 }} noWrap>
+              <Typography variant="body2" sx={{ color: '#e8f0f6', fontWeight: 700 }} noWrap>
                 {user?.full_name || user?.username}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#7d93a3' }} noWrap>
+              <Typography variant="caption" sx={{ color: '#6fb3e0', fontWeight: 600 }} noWrap>
                 {roleLabel[user?.role ?? 'staff']}
               </Typography>
             </Box>
@@ -279,7 +301,16 @@ export function Sidebar({
 
       {variant === 'permanent' && (
         <Box sx={{ display: 'flex', justifyContent: 'center', pb: 1.5 }}>
-          <IconButton size="small" onClick={onToggle} sx={{ color: '#7d93a3', bgcolor: 'rgba(255,255,255,0.05)' }}>
+          <IconButton
+            size="small"
+            onClick={onToggle}
+            sx={{
+              color: '#7d93a3',
+              bgcolor: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              '&:hover': { bgcolor: 'rgba(111,179,224,0.1)', color: '#6fb3e0' },
+            }}
+          >
             {collapsed ? <ChevronRightRoundedIcon fontSize="small" /> : <ChevronLeftRoundedIcon fontSize="small" />}
           </IconButton>
         </Box>

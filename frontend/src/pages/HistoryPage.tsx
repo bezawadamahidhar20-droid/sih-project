@@ -72,7 +72,7 @@ export function HistoryPage() {
     setLoading(true);
     setError('');
     api
-      .getPredictions({ page_size: 200 })
+      .getPredictions({ page_size: 1000 })
       .then((res) => setPredictions(res.predictions))
       .catch((err: any) =>
         setError(err?.response?.data?.detail || 'Failed to load scan history.')
@@ -251,8 +251,8 @@ export function HistoryPage() {
                     boxShadow: '0 14px 28px -10px rgba(15,36,48,0.2)',
                     transform: 'translateY(-3px)',
                   },
-                  border: p.is_flagged ? '1.5px solid' : undefined,
-                  borderColor: p.is_flagged ? 'info.main' : undefined,
+                  border: p.is_flagged ? '1.5px solid' : p.is_high_risk ? '1.5px solid' : p.is_low_confidence ? '1.5px solid' : undefined,
+                  borderColor: p.is_flagged ? 'info.main' : p.is_high_risk ? 'error.main' : p.is_low_confidence ? 'warning.main' : undefined,
                 }}
                 onClick={() => navigate(`/results/${p.scan_id}`)}
               >

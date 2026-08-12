@@ -27,6 +27,9 @@ class User(Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     last_login = Column(DateTime, nullable=True)
+    # Bumped to revoke ALL outstanding JWTs (password change, role/status
+    # change). Access/refresh tokens embed this value in their ``ver`` claim.
+    token_version = Column(Integer, default=0, nullable=False)
 
     predictions = relationship(
         "Prediction", back_populates="user", lazy="selectin",

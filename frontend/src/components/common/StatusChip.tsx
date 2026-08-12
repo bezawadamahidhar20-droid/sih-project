@@ -66,8 +66,13 @@ export function StatusChip({
         bgcolor: config.bg,
         color: config.color,
         '& .MuiChip-icon': { color: config.color, ml: '6px' },
-        border: `1px solid ${alpha(config.color, 0.18)}`,
-        fontWeight: 600,
+        border: `1px solid ${alpha(config.color, 0.2)}`,
+        fontWeight: 700,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        transition: 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+        '&:hover': {
+          transform: 'scale(1.04)',
+        },
       }}
     />
   );
@@ -94,7 +99,17 @@ export function ConfidenceBadge({
     <Chip
       size={size}
       label={`${pct}% confidence`}
-      sx={{ bgcolor: bg, color, fontVariantNumeric: 'tabular-nums', border: `1px solid ${alpha(color, 0.18)}`, fontWeight: 600 }}
+      sx={{
+        bgcolor: bg,
+        color,
+        fontVariantNumeric: 'tabular-nums',
+        border: `1px solid ${alpha(color, 0.2)}`,
+        fontWeight: 700,
+        transition: 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+        '&:hover': {
+          transform: 'scale(1.04)',
+        },
+      }}
     />
   );
 }
@@ -112,11 +127,16 @@ export function FindingChip({
       size={size}
       label={predictedClass}
       variant={isNormal ? 'outlined' : 'filled'}
-      sx={
-        isNormal
+      sx={{
+        ...(isNormal
           ? { borderColor: theme.palette.divider, color: theme.palette.text.secondary }
-          : { bgcolor: theme.palette.primary.dark, color: '#fff' }
-      }
+          : { bgcolor: theme.palette.primary.dark, color: '#fff' }),
+        fontWeight: 700,
+        transition: 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+        '&:hover': {
+          transform: 'scale(1.04)',
+        },
+      }}
     />
   );
 }

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, model_validator
@@ -12,7 +13,10 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8000
-    workers: int = 4
+    # Single worker: the in-process rate limiters, login brute-force store,
+    # refresh-token rotation set, and the ModelService singleton all assume
+    # exactly one process (see also the backend Dockerfile).
+    workers: int = 1
 
     jwt_secret_key: str = Field(..., min_length=32)
     jwt_algorithm: str = "HS256"
@@ -63,9 +67,24 @@ class Settings(BaseSettings):
     low_confidence_threshold: float = 0.7
     high_risk_threshold: float = 0.9
 
+    # Decision boundary for the abnormal class in binary (2-class) prediction.
+    # The CNN is trained with class imbalance (pneumonia overrepresented) and
+    # argmax@0.5 over-predicts the abnormal class out-of-distribution (real-
+    # world normals get flagged). Raising the threshold (e.g. 0.8) keeps
+    # sensitivity high while sharply cutting false positives. Ignored for
+    # >2-class models, where argmax is the only sensible rule.
+    model_decision_threshold: float = 0.5
+
     # Per-user sliding-window budgets for expensive endpoints (429 beyond).
     upload_rate_limit_per_minute: int = 30
     predict_rate_limit_per_minute: int = 30
+
+    # Set true when the backend sits behind the nginx reverse proxy (docker
+    # compose does). Enables trusting X-Forwarded-For when keying the login
+    # lockout / rate limiters. Keep false when the API is directly reachable
+    # (local dev), otherwise a client can spoof the header and bypass the
+    # limits.
+    trust_proxy_headers: bool = False
 
     seed_demo_users: bool = False
 
@@ -86,6 +105,23 @@ class Settings(BaseSettings):
                         "provide them via environment variables — never ship "
                         "well-known credentials to production."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _absolutize_relative_paths(self) -> "Settings":
+        """Resolve relative file paths against the backend package root.
+
+        ``UPLOAD_DIR`` / ``AUDIT_LOG_PATH`` / ``MODEL_PATH`` may be configured
+        relative to the backend directory (local dev). Resolving them here
+        keeps them stable regardless of the process working directory, so
+        stored DB paths (``encrypted_path``, ``gradcam_path``) can never break
+        if the server is later started from a different directory.
+        """
+        backend_root = Path(__file__).resolve().parent.parent.parent
+        for name in ("model_path", "upload_dir", "audit_log_path"):
+            value = getattr(self, name)
+            if value and not Path(value).is_absolute():
+                setattr(self, name, str((backend_root / value).resolve()))
         return self
 
     model_config = SettingsConfigDict(

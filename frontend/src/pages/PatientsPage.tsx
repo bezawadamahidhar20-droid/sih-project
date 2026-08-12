@@ -29,7 +29,7 @@ export function PatientsPage() {
   const loadData = useCallback(() => {
     setLoading(true);
     setError('');
-    Promise.all([api.getScans({ page_size: 300 }), api.getPredictions({ page_size: 300 })])
+    Promise.all([api.getScans({ page_size: 1000 }), api.getPredictions({ page_size: 1000 })])
       .then(([s, p]) => {
         setScans(s.scans);
         setPredictions(p.predictions);
@@ -165,7 +165,18 @@ export function PatientsPage() {
                   </Stack>
                   <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
                     <Chip size="small" label={`${patient.scanCount} scan${patient.scanCount > 1 ? 's' : ''}`} variant="outlined" />
-                    {patient.latestFinding && <Chip size="small" label={patient.latestFinding} variant="outlined" />}
+                    {patient.latestFinding && (
+                      <Chip
+                        size="small"
+                        label={patient.latestFinding}
+                        variant="outlined"
+                        sx={
+                          patient.latestFinding === 'Normal'
+                            ? { color: 'success.dark', borderColor: 'success.main' }
+                            : { color: 'warning.dark', borderColor: 'warning.main' }
+                        }
+                      />
+                    )}
                     {patient.flaggedCount > 0 && (
                       <Chip size="small" label={`${patient.flaggedCount} flagged`} color="info" variant="outlined" />
                     )}

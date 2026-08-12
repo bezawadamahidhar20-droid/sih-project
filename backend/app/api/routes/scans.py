@@ -113,13 +113,24 @@ async def upload_scan(
     # ever encrypted and stored at rest.
     encrypted_filename = f"{file_hash}.enc"
     encrypted_path = os.path.join(settings.upload_dir, encrypted_filename)
-    encrypt_file(persist_path, encrypted_path)
-
-    # Clean up temp artifacts.
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
-    if persist_path != temp_path and os.path.exists(persist_path):
-        os.remove(persist_path)
+    try:
+        encrypt_file(persist_path, encrypted_path)
+    except Exception:
+        # Encryption failed (disk full, Fernet error, ...): remove any partial
+        # ciphertext and re-raise; the finally below cleans the plaintext
+        # artifacts so no cleartext PHI survives on disk.
+        if os.path.exists(encrypted_path):
+            os.remove(encrypted_path)
+        raise
+    finally:
+        # Always clean the plaintext artifacts — the original temp upload and,
+        # for DICOM, the anonymized copy (may be the same file).
+        for p in (temp_path, persist_path):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
     
     scan = Scan(
         file_hash=file_hash,
@@ -180,7 +191,7 @@ def parse_dicom_date(date_str: Optional[str]) -> Optional[datetime]:
 @router.get("", response_model=ScanListResponse)
 async def list_scans(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=300),
+    page_size: int = Query(20, ge=1, le=1000),
     status_filter: Optional[ScanStatus] = Query(None),
     patient_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -275,3 +286,12 @@ async def delete_scan(
     await db.delete(scan)
     await db.commit()
     logger.info("Scan %s deleted by user %s", scan_id, current_user.id)
+    audit_logger.logger.info(
+        "scan_deleted",
+        extra={
+            "event_type": "scan_delete",
+            "user_id": str(current_user.id),
+            "scan_id": scan_id,
+            "file_hash": scan.file_hash,
+        },
+    )

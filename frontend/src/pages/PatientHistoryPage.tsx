@@ -99,7 +99,8 @@ export function PatientHistoryPage() {
                       }}
                       formatter={(value: any, _name, item: any) => [`${value}% (${item.payload.finding})`, 'Confidence']}
                     />
-                    <ReferenceLine y={70} stroke="#b7791f" strokeDasharray="4 4" label={{ value: '70% threshold', fontSize: 11, fill: '#8a5a14', position: 'insideBottomRight' }} />
+                    <ReferenceLine y={70} stroke="#b7791f" strokeDasharray="4 4" label={{ value: '70% low-conf', fontSize: 10, fill: '#8a5a14', position: 'insideBottomRight' }} />
+                    <ReferenceLine y={80} stroke="#0f5c8c" strokeDasharray="2 3" label={{ value: '80% decision', fontSize: 10, fill: '#0f5c8c', position: 'insideTopRight' }} />
                     <Line type="monotone" dataKey="confidence" stroke="#0f5c8c" strokeWidth={2.5} dot={{ r: 4, fill: '#0f5c8c', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
                   </LineChart>
                 </ResponsiveContainer>

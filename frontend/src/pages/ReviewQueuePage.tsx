@@ -26,7 +26,7 @@ export function ReviewQueuePage() {
     setLoading(true);
     setError('');
     api
-      .getPredictions({ page_size: 300 })
+      .getPredictions({ page_size: 1000 })
       .then((res) =>
         setPredictions(res.predictions.filter((p) => p.is_flagged || p.is_low_confidence || p.is_high_risk))
       )
@@ -125,8 +125,16 @@ export function ReviewQueuePage() {
                 <Chip
                   size="small"
                   icon={p.is_high_risk ? <ReportRoundedIcon sx={{ fontSize: 14 }} /> : undefined}
-                  label={p.is_high_risk ? 'CRITICAL' : p.is_low_confidence ? 'HIGH' : 'NORMAL'}
-                  color={p.is_high_risk ? 'error' : p.is_low_confidence ? 'warning' : 'default'}
+                  label={
+                    p.is_high_risk
+                      ? 'CRITICAL'
+                      : p.is_low_confidence
+                      ? 'LOW CONFIDENCE'
+                      : p.is_flagged
+                      ? 'FLAGGED'
+                      : 'REVIEW'
+                  }
+                  color={p.is_high_risk ? 'error' : p.is_low_confidence ? 'warning' : p.is_flagged ? 'info' : 'default'}
                   variant="outlined"
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ width: 120 }}>

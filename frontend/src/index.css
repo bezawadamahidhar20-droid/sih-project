@@ -6,6 +6,14 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Apple Design Tokens */
+  --apple-glass-bg: rgba(255, 255, 255, 0.72);
+  --apple-glass-border: rgba(255, 255, 255, 0.45);
+  --apple-glass-blur: 20px;
+  --apple-glass-saturate: 180%;
+  --apple-spring-ease: cubic-bezier(0.175, 0.885, 0.32, 1.1);
+  --apple-glow-primary: rgba(15, 92, 140, 0.15);
 }
 
 html,
@@ -18,14 +26,145 @@ body {
   margin: 0;
 }
 
-/* Subtle brand-tinted canvas: keeps the clinical calm, adds a hint of depth */
+/* Dark canvas: deep navy with glowing ambient orbs */
 body {
-  background-color: #f4f7f9;
+  background-color: #070f18;
   background-image:
-    radial-gradient(1200px 600px at 85% -10%, rgba(15, 92, 140, 0.05), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(15, 156, 143, 0.05), transparent 60%);
-  /* scroll (not fixed) — fixed repaints on scroll on iOS and hurts performance */
-  background-attachment: scroll;
+    radial-gradient(900px 600px at 80% -10%, rgba(15, 92, 140, 0.18), transparent 70%),
+    radial-gradient(700px 500px at -10% 110%, rgba(15, 156, 143, 0.12), transparent 70%),
+    radial-gradient(600px 400px at 50% 50%, rgba(61, 128, 168, 0.06), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* Glassmorphism helpers — dark variant */
+.glass-panel {
+  background: rgba(13, 31, 48, 0.75);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-panel-dark {
+  background: rgba(4, 10, 20, 0.85);
+  backdrop-filter: blur(30px) saturate(200%);
+  -webkit-backdrop-filter: blur(30px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Dynamic glowing aura keyframes */
+@keyframes ambientGlow {
+  0%, 100% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.15) translate(-15px, 20px);
+    opacity: 0.75;
+  }
+}
+
+@keyframes floatParticle {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(3deg);
+  }
+}
+
+@keyframes shimmerSweep {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+  }
+}
+
+@keyframes pulseBorder {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(15, 92, 140, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(15, 92, 140, 0);
+  }
+}
+
+.animate-glow-1 {
+  animation: ambientGlow 8s ease-in-out infinite;
+}
+
+.animate-glow-2 {
+  animation: ambientGlow 12s ease-in-out infinite reverse;
+}
+
+.animate-float {
+  animation: floatParticle 5s ease-in-out infinite;
+}
+
+/* Laser Scan Line animation */
+@keyframes laserScan {
+  0% {
+    top: 0%;
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 96%;
+    opacity: 0.2;
+  }
+}
+
+.laser-scanner-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 0%, #6fb3e0 30%, #3ddc84 50%, #6fb3e0 70%, transparent 100%);
+  box-shadow: 0 0 15px #6fb3e0, 0 0 30px #3ddc84;
+  animation: laserScan 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Neon Conic Gradient Animated Border */
+@keyframes rotateGradient {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.neon-border-box {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 1px;
+}
+
+.neon-border-box::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: conic-gradient(
+    transparent,
+    rgba(15, 92, 140, 0.8),
+    rgba(111, 179, 224, 0.9),
+    rgba(15, 156, 143, 0.8),
+    transparent 60%
+  );
+  animation: rotateGradient 6s linear infinite;
 }
 
 /* Text selection in brand color */
@@ -39,22 +178,22 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Consistent scrollbars */
+/* Consistent scrollbars — dark theme */
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(255,255,255,0.03);
 }
 ::-webkit-scrollbar-thumb {
-  background: #c3cfd7;
+  background: rgba(111, 179, 224, 0.2);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #a7b8c3;
+  background: rgba(111, 179, 224, 0.45);
   background-clip: content-box;
   border: 2px solid transparent;
 }
@@ -127,3 +266,4 @@ html {
     border-color: #b8c6cf !important;
   }
 }
+

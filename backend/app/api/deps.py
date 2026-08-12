@@ -68,7 +68,17 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive user",
         )
-    
+
+    # Token revocation: a missing ``ver`` claim counts as version 0 (tokens
+    # issued before token_version existed), so once a user's version is bumped
+    # (password change, role change) every older token is rejected.
+    if (payload.get("ver") or 0) != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token revoked — please sign in again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user
 
 

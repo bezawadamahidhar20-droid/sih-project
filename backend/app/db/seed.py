@@ -4,7 +4,7 @@ Gated by ``SEED_DEMO_USERS=true`` or a non-production environment so that
 production deployments are not silently given default credentials.
 """
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -51,11 +51,17 @@ async def seed_demo_users() -> None:
         )
 
     async with async_session_maker() as session:
-        total = await session.scalar(select(func.count()).select_from(User))
-        if total and total > 0:
+        # Per-account idempotency: only insert the demo users that are missing,
+        # so a pre-existing real user no longer blocks demo seeding.
+        usernames = [entry["username"] for entry in DEMO_USERS]
+        existing = set(
+            (await session.execute(select(User.username).where(User.username.in_(usernames)))).scalars()
+        )
+        missing = [entry for entry in DEMO_USERS if entry["username"] not in existing]
+        if not missing:
             return
 
-        for entry in DEMO_USERS:
+        for entry in missing:
             session.add(
                 User(
                     username=entry["username"],
@@ -67,4 +73,4 @@ async def seed_demo_users() -> None:
             )
 
         await session.commit()
-        logger.info("Seeded %d demo users", len(DEMO_USERS))
+        logger.info("Seeded %d demo user(s)", len(missing))

@@ -190,6 +190,14 @@ export function SettingsPage() {
                       highlight: health.model_loaded ? 'success' : 'warning',
                     },
                     { label: 'Compute device', value: health.device, mono: true },
+                    {
+                      label: 'Decision threshold',
+                      value:
+                        health.model_decision_threshold != null
+                          ? `${Math.round(health.model_decision_threshold * 100)}% (calibrated)`
+                          : 'argmax (0.5)',
+                      mono: true,
+                    },
                     { label: 'API version', value: health.version, mono: true },
                   ].map((row) => (
                     <Stack

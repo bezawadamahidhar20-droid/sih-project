@@ -25,9 +25,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // Demo mode can switch on mid-session (e.g. backend drops mid-use), so poll
-  // rather than reading a one-time snapshot. The banner must be unmissable:
-  // all data shown while demo mode is active is simulated.
   useEffect(() => {
     const check = () => setDemoMode(api.isDemoMode());
     check();
@@ -38,7 +35,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const width = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#070f18', position: 'relative', overflow: 'hidden' }}>
+      {/* Ambient background glow orbs */}
+      <Box sx={{
+        position: 'fixed', top: '-20%', right: '-10%',
+        width: 700, height: 700, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(circle, rgba(15,92,140,0.22) 0%, transparent 70%)',
+        filter: 'blur(60px)', zIndex: 0,
+      }} />
+      <Box sx={{
+        position: 'fixed', bottom: '-20%', left: '10%',
+        width: 600, height: 600, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(circle, rgba(15,156,143,0.15) 0%, transparent 70%)',
+        filter: 'blur(70px)', zIndex: 0,
+      }} />
+
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} aiOnline={aiOnline} />
       <Sidebar
         collapsed={false}
@@ -56,6 +67,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           flexDirection: 'column',
           ml: { xs: 0, md: `${width}px` },
           transition: 'margin-left .25s',
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         <TopBar onMenuToggle={() => setMobileOpen((o) => !o)} aiOnline={aiOnline} pathname={location.pathname} />
@@ -69,12 +82,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               gap: 1.25,
               px: 2,
               py: 1,
-              bgcolor: 'warning.main',
-              color: 'warning.contrastText',
+              bgcolor: 'rgba(240,180,41,0.15)',
+              borderBottom: '1px solid rgba(240,180,41,0.3)',
+              backdropFilter: 'blur(10px)',
             }}
           >
-            <WarningAmberRoundedIcon sx={{ fontSize: 18, flexShrink: 0 }} />
-            <Typography variant="body2" sx={{ fontWeight: 700, textAlign: 'center' }}>
+            <WarningAmberRoundedIcon sx={{ fontSize: 17, flexShrink: 0, color: '#f0b429' }} />
+            <Typography variant="body2" sx={{ fontWeight: 700, textAlign: 'center', color: '#f0b429' }}>
               DEMO MODE — backend unreachable. Showing simulated data. All results are fabricated
               and must NOT be used for any clinical decision.
             </Typography>
@@ -84,15 +98,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           component="main"
           sx={{ flex: 1, p: { xs: 2, sm: 3, md: 4 }, maxWidth: 1600, width: '100%', mx: 'auto' }}
         >
-          {/* Critically-damped spring page transition (damping 1.0, no bounce).
-              popLayout mounts the next page immediately and floats the exiting
-              one out — no blank gap while waiting for exit. */}
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div
               key={location.pathname}
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4, transition: { duration: 0.12 } }}
+              exit={{ opacity: 0, y: -5, transition: { duration: 0.12 } }}
               transition={{ type: 'spring', bounce: 0, duration: 0.38 }}
             >
               {children}

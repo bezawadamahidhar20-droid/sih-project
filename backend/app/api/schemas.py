@@ -1,7 +1,23 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field, EmailStr
+from pydantic import BaseModel, ConfigDict, Field, EmailStr, field_serializer
 from enum import Enum
+
+
+class _UtcOffsetSerialization(BaseModel):
+    """Serialize naive-UTC datetimes with an explicit ``+00:00`` offset.
+
+    The backend stores naive UTC (SQLite round-trip safety); without an
+    offset the frontend's ``new Date(...)`` misinterprets them as *local*
+    time, shifting every displayed timestamp (and even the calendar day of
+    ``study_date`` in negative-offset zones).
+    """
+
+    @field_serializer("*")
+    def _attach_utc_offset(self, value, _info):
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class UserRole(str, Enum):
@@ -50,7 +66,7 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
-class UserResponse(UserBase):
+class UserResponse(_UtcOffsetSerialization, UserBase):
     # Response uses plain str: stored emails (e.g. seeded *.local demo
     # addresses) must never fail serialization. Input validation in
     # UserCreate/UserUpdate still enforces EmailStr.
@@ -92,7 +108,7 @@ class ScanStatus(str, Enum):
     FAILED = "failed"
 
 
-class ScanResponse(BaseModel):
+class ScanResponse(_UtcOffsetSerialization, BaseModel):
     id: int
     file_hash: str
     original_filename: str
@@ -113,7 +129,7 @@ class ScanResponse(BaseModel):
 
 
 
-class PredictionResponse(BaseModel):
+class PredictionResponse(_UtcOffsetSerialization, BaseModel):
     id: int
     scan_id: int
     predicted_class: str
@@ -128,6 +144,9 @@ class PredictionResponse(BaseModel):
     is_flagged: bool = False
     flagged_by: Optional[int] = None
     flagged_at: Optional[datetime] = None
+    # Calibrated decision boundary in effect when this prediction was made
+    # (surfaced for clinical transparency; 0.5 = plain argmax).
+    model_decision_threshold: Optional[float] = None
     scan: Optional["ScanResponse"] = None
     created_at: datetime
 
@@ -165,11 +184,28 @@ class ErrorResponse(BaseModel):
     error_code: Optional[str] = None
 
 
+class ModelMetrics(BaseModel):
+    """Hold-out validation metrics from ``<model>.evaluation.json``."""
+    num_samples: Optional[int] = None
+    accuracy: Optional[float] = None
+    balanced_accuracy: Optional[float] = None
+    sensitivity: Optional[float] = None
+    specificity: Optional[float] = None
+    precision: Optional[float] = None
+    auc: Optional[float] = None
+    class_names: List[str] = []
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
     model_loaded: bool
     engine: str
     device: str
-    model_path: str
     heuristic_fallback_active: bool
+    # Calibrated decision boundary for the abnormal class (0.5 = plain
+    # argmax). Surfaced so the UI can explain WHY an image was called normal
+    # vs. abnormal at a given probability.
+    model_decision_threshold: Optional[float] = None
+    # Real hold-out validation metrics when a trained CNN is loaded.
+    model_metrics: Optional[ModelMetrics] = None

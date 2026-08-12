@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Box, Typography, LinearProgress, Stack, Divider } from '@mui/material';
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { motion, useSpring, useTransform } from 'motion/react';
 import { confidenceColor, confidenceSoftColor } from '../../theme';
 
@@ -10,6 +11,8 @@ interface ConfidenceMeterProps {
   showTable?: boolean;
   lowThreshold?: number;
   highThreshold?: number;
+  /** Calibrated decision boundary for the abnormal class (0.5 = argmax). */
+  decisionThreshold?: number | null;
 }
 
 // Count-up percentage driven by a critically-damped spring (no overshoot)
@@ -28,6 +31,7 @@ export function ConfidenceMeter({
   showTable = true,
   lowThreshold = 70,
   highThreshold = 85,
+  decisionThreshold,
 }: ConfidenceMeterProps) {
   const pct = Math.round(confidence * 100);
   const color = confidenceColor(confidence);
@@ -102,6 +106,29 @@ export function ConfidenceMeter({
           <Typography variant="caption" color="text.secondary">100%</Typography>
         </Stack>
       </Box>
+
+      {decisionThreshold != null && decisionThreshold > 0 && decisionThreshold < 1 && (
+        <Stack
+          direction="row"
+          spacing={1.25}
+          sx={{
+            mt: 1.5,
+            p: 1.5,
+            borderRadius: 2,
+            bgcolor: 'grey.50',
+            border: '1px solid',
+            borderColor: 'divider',
+            alignItems: 'flex-start',
+          }}
+        >
+          <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', mt: 0.15 }} />
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+            Decision threshold: <strong>{Math.round(decisionThreshold * 100)}%</strong>. The model reports the abnormal
+            class only when its probability reaches this calibrated boundary — predictions below it are treated as
+            normal to avoid false positives.
+          </Typography>
+        </Stack>
+      )}
 
       {pct < lowThreshold && (
         <Stack

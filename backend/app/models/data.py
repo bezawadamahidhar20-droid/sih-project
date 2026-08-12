@@ -43,25 +43,54 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def default_transforms(input_size: int = 224, train: bool = True):
-    """torchvision transforms matching the inference preprocessing pipeline."""
+    """torchvision transforms matching the inference preprocessing pipeline.
+
+    Resampling is LANCZOS to match ``app.services.image_processing.
+    preprocess_image`` exactly (train-time augmentation still differs by
+    design, but the base resize must not).
+    """
     import torchvision.transforms as T
 
     if train:
+        # Augmentation tuned for chest X-rays: brightness/contrast jitter
+        # mimics the huge scanner/exposure variance between institutions (the
+        # leading cause of out-of-distribution failures), plus mild geometry
+        # (flip, rotation, shear, scale) that keeps anatomy plausible.
         return T.Compose(
             [
-                T.Resize((input_size, input_size), interpolation=T.InterpolationMode.BILINEAR),
+                T.Resize((input_size, input_size), interpolation=T.InterpolationMode.LANCZOS),
                 T.RandomHorizontalFlip(p=0.5),
-                T.RandomAffine(degrees=8, translate=(0.05, 0.05)),
+                T.RandomAffine(
+                    degrees=12, translate=(0.06, 0.06), scale=(0.9, 1.1),
+                    shear=6,
+                ),
+                T.ColorJitter(brightness=0.3, contrast=0.3),
                 T.ToTensor(),
                 T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
             ]
         )
     return T.Compose(
         [
-            T.Resize((input_size, input_size), interpolation=T.InterpolationMode.BILINEAR),
+            T.Resize((input_size, input_size), interpolation=T.InterpolationMode.LANCZOS),
             T.ToTensor(),
             T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
+    )
+
+
+def resolve_positive_index(positive_class: str, class_names: Sequence[str]) -> int:
+    """Locate the abnormal class in ``class_names`` case-insensitively.
+
+    Dataset classes come from folder/CSV names (e.g. "PNEUMONIA") while the
+    CLI default is "Pneumonia" — an exact-match lookup would silently reject
+    the documented commands.
+    """
+    for i, name in enumerate(class_names):
+        if name.lower() == positive_class.lower():
+            return i
+    raise SystemExit(
+        f"--positive-class '{positive_class}' not found in dataset classes "
+        f"{class_names}. Use --positive-class to select the abnormal class."
     )
 
 

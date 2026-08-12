@@ -139,6 +139,7 @@ export function generateMockPredictions(scans: Scan[]): Prediction[] {
         is_flagged,
         flagged_by: is_flagged ? 1 : null,
         flagged_at: is_flagged ? scan.created_at : null,
+        model_decision_threshold: 0.8,
         scan,
         created_at: scan.created_at,
       });
@@ -154,5 +155,16 @@ export const DEMO_HEALTH: HealthResponse = {
   device: 'cuda:0',
   model_path: '/app/models/model.pth',
   heuristic_fallback_active: false,
+  model_decision_threshold: 0.8,
+  model_metrics: {
+    num_samples: 624,
+    accuracy: 0.891,
+    balanced_accuracy: 0.886,
+    sensitivity: 0.908,
+    specificity: 0.863,
+    precision: 0.902,
+    auc: 0.946,
+    class_names: ['Normal', 'Pneumonia'],
+  },
 };
 

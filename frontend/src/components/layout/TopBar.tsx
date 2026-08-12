@@ -95,17 +95,11 @@ export function TopBar({
       position="sticky"
       color="inherit"
       sx={{
-        bgcolor: 'rgba(255,255,255,0.72)',
-        backdropFilter: 'blur(20px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-        borderBottom: '1px solid rgba(255,255,255,0.45)',
-        '@media (prefers-reduced-transparency: reduce)': {
-          bgcolor: '#ffffff',
-          backdropFilter: 'none',
-          WebkitBackdropFilter: 'none',
-          borderBottom: '1px solid',
-          borderBottomColor: 'divider',
-        },
+        bgcolor: 'rgba(7,15,24,0.85)',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        borderBottom: '1px solid rgba(111,179,224,0.12)',
+        boxShadow: '0 4px 30px rgba(0,0,0,0.3)',
       }}
     >
       <Toolbar sx={{ gap: 1.5, minHeight: '72px !important' }}>
@@ -126,10 +120,17 @@ export function TopBar({
 
         <Chip
           size="small"
-          icon={<CircleIcon sx={{ fontSize: '9px !important', color: aiOnline ? 'success.main' : 'error.main' }} />}
-          label={aiOnline ? 'AI Engine Online' : 'AI Engine Offline'}
+          icon={<CircleIcon sx={{ fontSize: '8px !important', color: aiOnline ? '#3ddc84' : '#e05c5c' }} />}
+          label={aiOnline ? 'AI Online' : 'AI Offline'}
           variant="outlined"
-          sx={{ display: { xs: 'none', md: 'flex' } }}
+          sx={{
+            display: { xs: 'none', md: 'flex' },
+            color: aiOnline ? '#3ddc84' : '#e05c5c',
+            borderColor: aiOnline ? 'rgba(61,220,132,0.35)' : 'rgba(224,92,92,0.35)',
+            bgcolor: aiOnline ? 'rgba(61,220,132,0.08)' : 'rgba(224,92,92,0.08)',
+            fontWeight: 700,
+            fontSize: '0.75rem',
+          }}
         />
 
         <IconButton onClick={(e) => setNotifEl(e.currentTarget)} aria-label="Notifications">
@@ -194,37 +195,54 @@ export function TopBar({
           )}
         </Menu>
 
-        <Stack
-          direction="row"
-          spacing={1}
-          onClick={(e) => setAnchorEl(e.currentTarget)}
-          sx={{ cursor: 'pointer', pl: 0.5, alignItems: 'center' }}
-        >
-          <Box
+        <motion.div whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.97 }}>
+          <Stack
+            direction="row"
+            spacing={1.25}
+            onClick={(e) => setAnchorEl(e.currentTarget)}
             sx={{
-              width: 36,
-              height: 36,
-              borderRadius: '50%',
-              bgcolor: 'primary.main',
-              color: '#fff',
-              display: 'flex',
+              cursor: 'pointer',
+              pl: 0.75,
+              pr: 1.5,
+              py: 0.5,
+              borderRadius: 3,
+              bgcolor: 'rgba(15, 92, 140, 0.05)',
+              border: '1px solid rgba(15, 92, 140, 0.12)',
               alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
-              fontWeight: 700,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                bgcolor: 'rgba(15, 92, 140, 0.09)',
+                borderColor: 'rgba(15, 92, 140, 0.25)',
+              },
             }}
           >
-            {initials}
-          </Box>
-          <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-              {user?.full_name || user?.username}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {roleLabel[user?.role ?? 'staff']}
-            </Typography>
-          </Box>
-        </Stack>
+            <Box
+              sx={{
+                width: 34,
+                height: 34,
+                borderRadius: '50%',
+                backgroundImage: 'linear-gradient(135deg, #0f5c8c 0%, #0b6f65 100%)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 12.5,
+                fontWeight: 700,
+                boxShadow: '0 2px 8px rgba(15,92,140,0.3)',
+              }}
+            >
+              {initials}
+            </Box>
+            <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, fontSize: 13, lineHeight: 1.2 }} noWrap>
+                {user?.full_name || user?.username}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }} noWrap>
+                {roleLabel[user?.role ?? 'staff']}
+              </Typography>
+            </Box>
+          </Stack>
+        </motion.div>
         <Menu anchorEl={anchorEl} open={!!anchorEl} onClose={() => setAnchorEl(null)} slotProps={{ paper: { sx: { mt: 1, minWidth: 200 } } }}>
           <MenuItem onClick={() => { setAnchorEl(null); navigate('/settings'); }}>
             <ListItemIcon><PersonRoundedIcon fontSize="small" /></ListItemIcon>

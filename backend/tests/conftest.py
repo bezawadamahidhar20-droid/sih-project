@@ -1,3 +1,4 @@
+import os
 import pytest
 import sys
 from pathlib import Path
@@ -9,6 +10,11 @@ pytest_plugins = ["pytest_asyncio"]
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "asyncio: mark test as async")
+
+
+# Tests exercise the proxy-aware client-IP path (login lockout, rate limits)
+# exactly as the docker-compose deployment runs it.
+os.environ.setdefault("TRUST_PROXY_HEADERS", "true")
 
 
 from httpx import AsyncClient, ASGITransport
@@ -41,10 +47,12 @@ async def override_get_db():
 
 @pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
-    """The login rate limiter is a process-global in-memory store; clear it
-    between tests so failed-login tests never trip a 429 and flake."""
-    from app.api.routes.auth import _LOGIN_FAILURES
+    """The login rate limiter and the consumed-refresh-token store are
+    process-global in-memory stores; clear them between tests so failed-login
+    / refresh-rotation tests never bleed into the next one."""
+    from app.api.routes.auth import _LOGIN_FAILURES, _CONSUMED_REFRESH_JTIS
     _LOGIN_FAILURES.clear()
+    _CONSUMED_REFRESH_JTIS.clear()
     yield
 
 
@@ -83,7 +91,11 @@ async def db_session():
 @pytest.fixture
 async def client(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
-    transport = ASGITransport(app=app)
+    # Starlette's ServerErrorMiddleware always re-raises unhandled exceptions
+    # after sending the 500 (so the server can log them); with the default
+    # raise_app_exceptions=True that escapes into the test. Match real client
+    # behavior: see the 500 response, not the exception.
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(
         transport=transport, base_url="http://test", follow_redirects=True
     ) as ac:

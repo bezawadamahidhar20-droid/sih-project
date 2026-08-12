@@ -1,14 +1,14 @@
 import os
 import json
-import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from starlette.background import BackgroundTask
 
 from app.api.deps import get_current_active_user, require_roles, rate_limit
 from app.core.ratelimit import predict_limiter
@@ -17,7 +17,7 @@ from app.api.schemas import (
     FlagPredictionRequest, ScanResponse,
 )
 from app.core.config import get_settings
-from app.core.security import decrypt_file, encrypt_file
+from app.core.security import decrypt_file, decrypt_data, encrypt_file
 from app.core.logging import audit_logger, get_logger
 from app.core.timeutil import utcnow
 from app.db.session import get_db
@@ -78,14 +78,15 @@ def _run_inference_sync(
     original_path = os.path.join(gradcam_dir, f"original_{scan.file_hash}.png")
 
     gradcam_overlay = create_overlay_image(image, result["gradcam"])
-    save_image(gradcam_overlay, gradcam_path)
-    save_image(image, original_path)
 
     # Derived images are patient data too: encrypt them at rest and only
-    # decrypt transiently when serving (see get_prediction_image). The
-    # ``finally`` guarantees no cleartext PNG survives — even if encryption
-    # fails mid-way, nothing plaintext is left behind.
+    # decrypt transiently when serving (see get_prediction_image). Rendering
+    # AND encryption happen inside the try so the ``finally`` guarantees no
+    # cleartext PNG survives — even if a save or encryption step fails
+    # mid-way, nothing plaintext is left behind.
     try:
+        save_image(gradcam_overlay, gradcam_path)
+        save_image(image, original_path)
         encrypt_file(gradcam_path, gradcam_path + ".enc")
         encrypt_file(original_path, original_path + ".enc")
     finally:
@@ -176,7 +177,43 @@ async def predict_scan(
         scan.processed_at = utcnow()
 
         db.add(prediction)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Concurrent duplicate prediction: ``with_for_update()`` is a
+            # no-op on SQLite, so two requests can both reach the INSERT. The
+            # unique scan_id constraint is the final authority — roll back,
+            # discard the derived images we just wrote, and serve the winning
+            # request's cached result instead of 500ing (and never leave the
+            # scan stuck in "processing"). rollback() expires every loaded
+            # instance, so refresh the scan before touching its attributes
+            # (accessing an expired instance in an async session would raise
+            # MissingGreenlet).
+            await db.rollback()
+            await db.refresh(scan)
+            for derived in (
+                gradcam_path,
+                gradcam_path + ".enc",
+                os.path.join(os.path.dirname(gradcam_path), f"original_{scan.file_hash}.png.enc"),
+            ):
+                try:
+                    if derived and os.path.exists(derived):
+                        os.remove(derived)
+                except OSError:
+                    pass
+            existing_pred = await db.execute(
+                select(Prediction)
+                .where(Prediction.scan_id == scan_id)
+                .options(selectinload(Prediction.scan))
+            )
+            existing = existing_pred.scalar_one_or_none()
+            if existing:
+                return await _build_predict_response(existing, scan)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Scan is already being processed",
+            )
+
         await db.refresh(prediction)
 
         audit_logger.log_prediction(
@@ -195,6 +232,7 @@ async def predict_scan(
     except ImageQualityError as e:
         # The file is a valid image but cannot support meaningful inference
         # (blank / degenerate). 422 with an actionable message, not a 500.
+        await db.rollback()
         scan.status = ScanStatus.FAILED
         await db.commit()
         logger.warning("Image quality check failed (scan %s): %s", scan_id, e)
@@ -205,7 +243,10 @@ async def predict_scan(
             context={"scan_id": scan_id},
         )
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
+        await db.rollback()
         scan.status = ScanStatus.FAILED
         await db.commit()
         logger.error(f"Prediction failed: {e}")
@@ -272,6 +313,11 @@ def _to_prediction_response(
         is_flagged=prediction.is_flagged or False,
         flagged_by=prediction.flagged_by,
         flagged_at=prediction.flagged_at,
+        model_decision_threshold=(
+            settings.model_decision_threshold
+            if settings.model_num_classes == 2
+            else None
+        ),
         scan=_scan_response(scan) if scan is not None else None,
         created_at=prediction.created_at,
     )
@@ -284,7 +330,7 @@ def _scan_response(scan: Scan) -> ScanResponse:
 @router.get("", response_model=PredictionListResponse)
 async def list_predictions(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=300),
+    page_size: int = Query(20, ge=1, le=1000),
     patient_id: Optional[str] = Query(None),
     predicted_class: Optional[str] = Query(None),
     min_confidence: Optional[float] = Query(None, ge=0, le=1),
@@ -412,14 +458,6 @@ async def _scan_for_image(db: AsyncSession, filename: str) -> Optional[Scan]:
     return None
 
 
-def _cleanup_temp(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
-
-
 @router.get("/image/{filename}")
 async def get_prediction_image(
     filename: str,
@@ -454,12 +492,15 @@ async def get_prediction_image(
     # (created before this fix) are still served directly.
     encrypted_path = resolved + ".enc"
     if os.path.exists(encrypted_path):
-        temp_out = os.path.join(GRADCAM_DIR, f".tmp_{uuid.uuid4().hex}.png")
-        decrypt_file(encrypted_path, temp_out)
-        return FileResponse(
-            temp_out,
+        # Decrypt fully in memory and serve the bytes directly — no temp file
+        # ever touches disk, so a dropped client connection cannot strand a
+        # decrypted PHI image in the gradcam directory.
+        with open(encrypted_path, "rb") as f:
+            plain = decrypt_data(f.read())
+        return Response(
+            content=plain,
             media_type="image/png",
-            background=BackgroundTask(_cleanup_temp, temp_out),
+            headers={"Cache-Control": "private, max-age=300"},
         )
 
     if not os.path.exists(resolved):

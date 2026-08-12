@@ -72,6 +72,8 @@ services:
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       AUDIT_LOG_PATH: /app/logs/audit.log
+      # Behind nginx: trust X-Forwarded-For for login-lockout / rate-limit keys.
+      TRUST_PROXY_HEADERS: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
       LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
       HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}

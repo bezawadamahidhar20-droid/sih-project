@@ -44,13 +44,22 @@ def binary_metrics(
     y_true = np.asarray(y_true, dtype=np.int64)
     y_score = np.asarray(y_score, dtype=np.float64)
 
-    # Default hard prediction = argmax of the two-class score vector.
-    if y_pred is None:
-        y_pred = (y_score[:, positive_index] > 0.5).astype(np.int64)
-
     pos = positive_index
+    neg = 1 - pos
+
+    # Default hard prediction from the two-class score vector: the threshold
+    # tests the positive-class score, so the resulting label must be expressed
+    # as a CLASS index (pos/neg), not a bare 0/1 positive indicator — the two
+    # only coincide when the positive class happens to be index 1.
+    if y_pred is None:
+        y_pred = np.where(y_score[:, positive_index] > 0.5, pos, neg).astype(np.int64)
+
+    # Extract tp/fp/fn/tn around the ACTUAL positive index (the abnormal
+    # class), not a hardcoded index 1 — otherwise the whole report silently
+    # describes the wrong class when the abnormal class sits at index 0
+    # (e.g. class order ["PNEUMONIA", "NORMAL"]).
     cm = confusion_matrix(y_true, y_pred, 2)
-    tn, fp, fn, tp = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
+    tn, fp, fn, tp = cm[neg, neg], cm[neg, pos], cm[pos, neg], cm[pos, pos]
 
     sensitivity = _safe_div(tp, tp + fn)  # recall of the positive class
     specificity = _safe_div(tn, tn + fp)

@@ -25,12 +25,14 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
 
 ## Demo assets
 
-| Login hero background | Sample chest X-ray | Grad-CAM heatmap example |
+| Login background (legacy) | Sample chest X-ray | Grad-CAM heatmap example |
 | --- | --- | --- |
 | ![Login hero](frontend/public/images/login-hero.jpg) | ![Sample X-ray](frontend/public/images/demo-xray.jpg) | ![Grad-CAM heatmap](frontend/public/images/demo-xray-heatmap.jpg) |
 
 > These demo assets are checked in under [`frontend/public/images/`](frontend/public/images/) and
-> used by the UI for the login hero, demo scans, and explainability views.
+> used by the UI for demo scans and explainability views. The login page is
+> now rendered with an animated neural-mesh canvas (see LoginPage) rather than
+> the static hero image (kept for backward compatibility).
 
 ---
 
@@ -72,16 +74,38 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
 
 - **Upload → predict → heatmap** loop with drag & drop upload (JPEG/PNG/DICOM),
   client-side validation, progress bars, and slow-inference feedback.
+- **Premium dark UI**: deep-navy glassmorphism design system (dark mode) with
+  an animated login — interactive neural-mesh particle canvas, ambient glowing
+  orbs, 3D tilt cards with specular glare, spring micro-interactions, and a
+  reduced-motion-safe `VerdictHero` result banner with a spring-driven
+  confidence gauge.
 - **Grad-CAM explainability**: toggleable heatmap overlay with an opacity
   slider and side-by-side comparison (CNN engine) or a deterministic saliency
   map (baseline engine).
 - **Security**: JWT auth with refresh tokens, RBAC (doctor/radiologist full
   access; staff upload-only + their own scans), AES-256 (Fernet) encryption at
   rest, DICOM PHI anonymization, structured audit logging without PHI.
+- **Refresh-token rotation & tokens you can revoke**: refresh tokens are
+  one-time-use (`jti` rotation — replaying a used token returns 401), and a
+  `token_version` claim lets a password or role/status change revoke *every*
+  outstanding access + refresh token instantly. Login failures are keyed on
+  the proxy-aware client IP and bcrypt timing is equalized for unknown
+  usernames, so neither lockouts nor account-existence probing can follow a
+  spoofed or shared proxy address.
 - **Clinical safety UX**: predictions below the 70% confidence threshold are
   flagged, high-risk findings are emphasized, and doctors can flag results for
   review. Model selection during training prioritizes **sensitivity** (minimize
-  false negatives).
+  false negatives) or **balanced accuracy** (`--selection-metric
+  balanced_accuracy`) to avoid over-predicting the abnormal class.
+- **Calibrated decision threshold**: binary models report the abnormal class
+  only above `MODEL_DECISION_THRESHOLD` (default 0.8 instead of plain
+  argmax@0.5), which sharply cuts false positives on out-of-distribution
+  (real-world) scans while preserving sensitivity. The active threshold is
+  surfaced via `/api/v1/health` and shown in the UI (result page + dashboard),
+  along with real hold-out validation metrics from `<model>.evaluation.json`.
+  Health-checked in this repo against real images downloaded from Wikimedia
+  Commons: 3/3 pneumonia cases correctly identified, and the calibrated
+  boundary raised overall real-world accuracy from ~25% → 58% on that set.
 - **Engine-agnostic inference**: the API uses a trained CNN when a
   `model.pth` state dict is present at `MODEL_PATH`. With the model missing
   and `ALLOW_HEURISTIC_FALLBACK=false` (the production default), prediction
@@ -94,7 +118,7 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite 7, Material UI v9, Tailwind CSS v4, Recharts, React Router v7, react-dropzone, notistack |
+| Frontend | React 19, TypeScript, Vite 7, Material UI v9, Tailwind CSS v4, **Motion** (Framer Motion), Recharts, React Router v7, react-dropzone, notistack |
 | Backend | FastAPI, SQLAlchemy 2 (async), Pydantic v2, Uvicorn |
 | ML | PyTorch 2.2 (ResNet / EfficientNet / DenseNet transfer learning), Grad-CAM, NumPy-only evaluation metrics |
 | Data | PostgreSQL 16 (production) / SQLite + aiosqlite (local dev) |
@@ -107,7 +131,7 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
 
 ### Prerequisites
 
-- Python 3.11 or 3.12 (pinned `numpy==1.26.4` / `torch==2.2.1` don't support 3.13)
+- Python 3.11–3.13 (pins in `backend/requirements.txt` mirror the tested stack: `torch==2.13.0` / `numpy==2.5.1` / `fastapi==0.141.1`)
 - Node.js 20+
 - npm
 
@@ -235,6 +259,29 @@ Then restart the backend — `/api/v1/health` and the Settings page report
 code changes. See [`backend/app/models/README.md`](backend/app/models/README.md)
 for dataset formats, CLI flags, and CSV (NIH-style) support.
 
+### Model calibration & retraining tooling
+
+The repo ships several dev-only scripts (in `backend/`) used to retrain and
+validate the deployed CNN:
+
+| Script | Purpose |
+| --- | --- |
+| `run_v2_retrain.ps1` | Launches a `resnet50` v2 retrain (balanced-accuracy selection, class weights, augmented aug pipeline) into `models/model_v2.pth` |
+| `threshold_analysis.py` | Sweeps the abnormal-class decision threshold over a split and prints acc / bal-acc / sens / spec / F1 / AUC at each operating point (+ best Youden / balanced-accuracy cut) |
+| `online_check.py` | Runs the deployed CNN on labeled chest X-rays downloaded from Wikimedia Commons (out-of-distribution) |
+| `compare_models.py` | Side-by-side test-split + online-set comparison of `model.pth` vs `model_v2.pth` so the better checkpoint can be promoted |
+
+Example:
+
+```bash
+cd backend
+# Retrain v2 (selects checkpoint by balanced accuracy, augmented pipeline)
+.\run_v2_retrain.ps1          # or the equivalent python -m app.models.train ...
+python threshold_analysis.py  val   # pick a calibrated threshold
+python online_check.py             # real-world sanity check
+python compare_models.py           # decide whether to promote model_v2.pth
+```
+
 ## Docker deployment (roadmap step 6)
 
 ```bash
@@ -268,11 +315,15 @@ docker compose up --build
 backend/
   app/
     api/routes/      # auth, scans, predictions, health (FastAPI)
-    core/            # config, security (JWT/encryption), logging
+    core/            # config, security (JWT/encryption), logging, netutil (proxy-aware client IP)
     db/              # SQLAlchemy models, session, seed
     services/        # image_processing (DICOM/PHI), model_inference (engines)
     models/          # TRAINING PIPELINE: metrics, data, train, evaluate
-  tests/             # pytest suite (auth, RBAC, upload→predict→heatmap, metrics)
+  tests/             # pytest suite (auth, RBAC, upload→predict→heatmap, metrics, token rotation, regressions)
+  compare_models.py  # dev: pitted model.pth vs model_v2.pth (test-split + online set)
+  online_check.py    # dev: real-world Wikimedia Commons sanity check
+  threshold_analysis.py  # dev: decision-threshold sweep + Youden / balanced-accuracy operating point
+  run_v2_retrain.ps1     # dev: Windows launcher for a v2 retrain
   Dockerfile         # python:3.11-slim
 frontend/
   public/images/     # demo assets (login hero, sample scans, heatmap)
@@ -297,7 +348,14 @@ docker-compose.yml   # postgres + backend + frontend
   their own account; role changes are doctor/radiologist-only.
 - **Brute-force protection**: `POST /auth/login` is rate-limited per
   IP + username (5 failures / 15 min, in-process — swap for Redis/nginx when
-  scaling horizontally).
+  scaling horizontally). The client key is proxy-aware: behind nginx the last
+  `X-Forwarded-For` entry is trusted (`TRUST_PROXY_HEADERS=true`), so an
+  attacker behind the proxy can no longer lock out a real user. Unknown
+  usernames answer with a dummy bcrypt hash to equalize timing.
+- **Session revocation & refresh rotation**: every refresh token carries a
+  one-time `jti` (reuse → 401) and access/refresh tokens embed
+  `token_version`; changing a password or a user's role/active status bumps
+  it and immediately invalidates all previously issued tokens.
 - **Endpoint rate limiting**: upload and prediction endpoints are guarded by a
   per-user sliding window (`UPLOAD_RATE_LIMIT_PER_MINUTE` /
   `PREDICT_RATE_LIMIT_PER_MINUTE`, default 30/min) that returns 429 with
@@ -313,7 +371,7 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 60 tests (validation, cleanup, security, RBAC, ML safety, rate limits, image-quality gate)
+# Backend — 70 tests (validation, cleanup, security, RBAC, ML safety, rate limits, image-quality gate, token rotation/revocation)
 cd backend
 .venv/Scripts/python -m pytest -q
 
@@ -347,8 +405,10 @@ uploaded scans — those are gitignored.
 > trained CNN (`backend/models/model.pth` + summary/evaluation JSON) ships
 > with the repo because the API fails loudly without it (see
 > [Testing](#testing) and [Training a real model](#training-a-real-model-roadmap-steps-2--5)).
-> Only add *new* retrained checkpoints when they are meant to ship with the
-> product; keep experimental weights out of the repository.
+> A v2 retrain checkpoint (`model_v2.pth`, balanced-accuracy selection) is
+> also tracked for off-line comparison via `compare_models.py`. Only add
+> *new* retrained checkpoints when they are meant to ship with the product;
+> keep experimental weights out of the repository.
 
 ## License
 

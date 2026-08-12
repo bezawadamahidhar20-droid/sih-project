@@ -173,40 +173,61 @@ export function UploadDropzone({ onUploaded, onError, defaultPatientId = '' }: U
 
       <Paper
         {...getRootProps()}
-        variant="outlined"
+        elevation={0}
         sx={{
           p: 5,
-          borderRadius: 3,
+          borderRadius: 4,
           borderStyle: 'dashed',
           borderWidth: 2,
           textAlign: 'center',
           cursor: 'pointer',
-          transition: 'all .2s',
-          bgcolor: isDragReject ? 'error.light' : isDragActive ? 'info.light' : 'grey.50',
-          borderColor: isDragReject ? 'error.main' : isDragActive ? 'primary.main' : 'divider',
-          '&:hover': { borderColor: 'primary.main', bgcolor: 'info.light' },
+          position: 'relative',
+          overflow: 'hidden',
+          transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+          bgcolor: isDragReject
+            ? 'rgba(192, 54, 44, 0.08)'
+            : isDragActive
+            ? 'rgba(15, 92, 140, 0.12)'
+            : 'rgba(255, 255, 255, 0.75)',
+          backdropFilter: 'blur(16px)',
+          borderColor: isDragReject
+            ? 'error.main'
+            : isDragActive
+            ? 'primary.main'
+            : 'rgba(15, 92, 140, 0.25)',
+          transform: isDragActive ? 'scale(1.02)' : 'none',
+          boxShadow: isDragActive
+            ? '0 12px 32px rgba(15, 92, 140, 0.22), 0 0 20px rgba(61,128,168,0.2)'
+            : '0 4px 16px rgba(15, 36, 48, 0.04)',
+          '&:hover': {
+            borderColor: 'primary.main',
+            bgcolor: 'rgba(15, 92, 140, 0.06)',
+            transform: 'translateY(-2px)',
+          },
         }}
       >
+        {/* Holographic Laser Scanning Line */}
+        <Box className="laser-scanner-line" />
         <input {...getInputProps()} />
         <Box
           sx={{
-            width: 68,
-            height: 68,
+            width: 72,
+            height: 72,
             mx: 'auto',
             mb: 2,
-            borderRadius: 3,
+            borderRadius: 3.5,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: isDragActive ? 'primary.main' : 'background.paper',
+            bgcolor: isDragActive ? 'primary.main' : 'rgba(15, 92, 140, 0.08)',
             border: '1px solid',
-            borderColor: isDragActive ? 'primary.main' : 'divider',
-            boxShadow: isDragActive ? '0 8px 24px rgba(15,92,140,0.25)' : 'none',
-            transition: 'all .2s ease',
-            transform: isDragActive ? 'translateY(-2px) scale(1.04)' : 'none',
+            borderColor: isDragActive ? 'primary.main' : 'rgba(15, 92, 140, 0.2)',
+            boxShadow: isDragActive ? '0 8px 24px rgba(15,92,140,0.35)' : 'none',
+            transition: 'all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+            transform: isDragActive ? 'translateY(-4px) scale(1.1)' : 'none',
           }}
         >
-          <CloudUploadRoundedIcon sx={{ fontSize: 34, color: isDragActive ? '#fff' : 'primary.main' }} />
+          <CloudUploadRoundedIcon sx={{ fontSize: 36, color: isDragActive ? '#fff' : 'primary.main' }} />
         </Box>
         <Typography variant="subtitle1" sx={{ fontFamily: 'Figtree, sans-serif' }}>
           {isDragActive ? 'Drop medical images here' : 'Drag & drop medical images here'}

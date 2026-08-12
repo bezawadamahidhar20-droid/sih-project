@@ -1,4 +1,5 @@
 import base64
+import uuid
 from datetime import timedelta
 from typing import Optional, Dict, Any
 
@@ -44,14 +45,16 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
         expire = utcnow_aware() + expires_delta
     else:
         expire = utcnow_aware() + timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    to_encode.update({"exp": expire, "type": "access"})
+    # jti enables refresh-token rotation (one-time use); ``ver`` ties the token
+    # to the user's token_version so password/role changes can revoke it.
+    to_encode.update({"exp": expire, "type": "access", "jti": uuid.uuid4().hex})
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
 def create_refresh_token(data: Dict[str, Any]) -> str:
     to_encode = data.copy()
     expire = utcnow_aware() + timedelta(days=settings.jwt_refresh_token_expire_days)
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({"exp": expire, "type": "refresh", "jti": uuid.uuid4().hex})
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 

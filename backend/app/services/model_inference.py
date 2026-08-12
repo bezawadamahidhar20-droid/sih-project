@@ -73,19 +73,59 @@ class GradCAM:
         target_module.register_forward_hook(forward_hook)
         target_module.register_full_backward_hook(backward_hook)
 
-    def generate(self, input_tensor: Any, class_idx: Optional[int] = None) -> np.ndarray:
-        import torch
-        import torch.nn.functional as F
+    def _require_forward_state(self) -> None:
+        """Fail with a diagnosable error instead of a bare TypeError when the
+        target layer never ran in the forward pass."""
+        if self.activations is None:
+            raise RuntimeError(
+                "Grad-CAM hooks captured no forward state — target layer "
+                f"'{self.target_layer}' did not run in the forward pass."
+            )
 
+    def _require_backward_state(self) -> None:
+        """Fail when the backward pass did not propagate through the target
+        layer (checked AFTER backward, which populates ``self.gradients``)."""
+        if self.gradients is None:
+            raise RuntimeError(
+                "Grad-CAM hooks captured no gradients — target layer "
+                f"'{self.target_layer}' did not participate in the backward pass."
+            )
+
+    def generate(self, input_tensor: Any, class_idx: Optional[int] = None) -> np.ndarray:
+        """Forward + backward in one call (used by evaluate.py examples)."""
         self.model.eval()
+        # Clear any state from a previous call BEFORE this forward, so a later
+        # failure can never mix stale activations/gradients with fresh ones.
+        self.activations = None
+        self.gradients = None
         output = self.model(input_tensor)
+        return self.from_logits(output, class_idx)
+
+    def from_logits(self, output: Any, class_idx: Optional[int] = None) -> np.ndarray:
+        """Compute the CAM from an existing forward output (and its graph).
+
+        Lets the model service reuse ONE forward pass for both softmax and
+        Grad-CAM instead of running the network twice per prediction.
+        """
+        # Forward hook state must already exist: the caller ran the forward
+        # pass before calling this. (Backward state is populated below, inside
+        # this method, so it must NOT be required here.)
+        self._require_forward_state()
 
         if class_idx is None:
-            class_idx = output.argmax(dim=1).item()
+            class_idx = int(output.argmax(dim=1).item())
 
         self.model.zero_grad()
+        # Null the gradient slot right before backward: if backward fails, it
+        # stays None and the guard below fires instead of silently reusing
+        # stale gradients from a previous call.
+        self.gradients = None
         target = output[0, class_idx]
-        target.backward(retain_graph=True)
+        # The graph is used exactly once (nothing reuses it after this), so
+        # free it on backward instead of retaining it until GC.
+        target.backward(retain_graph=False)
+
+        self._require_backward_state()
 
         gradients = self.gradients[0].cpu().numpy()
         activations = self.activations[0].cpu().numpy()
@@ -145,54 +185,66 @@ class ModelService:
     _device = "cpu"
     _engine = HEURISTIC_ENGINE
     _inference_lock = threading.Lock()
+    _init_lock = threading.Lock()
 
     def __new__(cls):
+        # Double-checked locking so two threads can never race to create two
+        # singletons (and thus load the CNN twice).
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
         if not getattr(self, "_initialized", False):
-            self._initialize()
+            with self._init_lock:
+                if not getattr(self, "_initialized", False):
+                    self._initialize()
 
     # ------------------------------------------------------------------ init
     def _initialize(self) -> None:
-        self._initialized = True
         self._model = None
         self._gradcam = None
         self._device = "cpu"
         self._engine = HEURISTIC_ENGINE
 
-        model_path = Path(settings.model_path)
-        if model_path.exists():
-            try:
-                self._load_cnn(model_path)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.error(
-                    "Failed to load CNN model (%s); falling back to %s engine",
-                    exc,
-                    HEURISTIC_ENGINE,
-                )
-                self._model = None
-                self._gradcam = None
-                self._device = "cpu"
-                self._engine = HEURISTIC_ENGINE
+        try:
+            model_path = Path(settings.model_path)
+            if model_path.exists():
+                try:
+                    self._load_cnn(model_path)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error(
+                        "Failed to load CNN model (%s); falling back to %s engine",
+                        exc,
+                        HEURISTIC_ENGINE,
+                    )
+                    self._model = None
+                    self._gradcam = None
+                    self._device = "cpu"
+                    self._engine = HEURISTIC_ENGINE
 
-        self._heuristic_active = self._model is None and settings.allow_heuristic_fallback
-        if self._model is None:
-            if settings.allow_heuristic_fallback:
-                logger.warning(
-                    "No trained model found at '%s' and ALLOW_HEURISTIC_FALLBACK=true — "
-                    "using '%s' engine. This is a DEV-ONLY baseline, never clinical-grade.",
-                    settings.model_path,
-                    HEURISTIC_ENGINE,
-                )
-            else:
-                logger.error(
-                    "No trained model found at '%s' and heuristic fallback is disabled — "
-                    "prediction requests will FAIL (no heuristic guesses served).",
-                    settings.model_path,
-                )
+            self._heuristic_active = self._model is None and settings.allow_heuristic_fallback
+            if self._model is None:
+                if settings.allow_heuristic_fallback:
+                    logger.warning(
+                        "No trained model found at '%s' and ALLOW_HEURISTIC_FALLBACK=true — "
+                        "using '%s' engine. This is a DEV-ONLY baseline, never clinical-grade.",
+                        settings.model_path,
+                        HEURISTIC_ENGINE,
+                    )
+                else:
+                    logger.error(
+                        "No trained model found at '%s' and heuristic fallback is disabled — "
+                        "prediction requests will FAIL (no heuristic guesses served).",
+                        settings.model_path,
+                    )
+        finally:
+            # Flag LAST: if anything above raises (e.g. a settings access), the
+            # singleton stays retryable instead of being stuck half-initialized.
+            # The _init_lock already prevents concurrent double-initialization.
+            self._initialized = True
 
     def _load_cnn(self, model_path: Path) -> None:
         import torch
@@ -201,6 +253,21 @@ class ModelService:
         model, target_layer = build_model(
             settings.model_architecture, settings.model_num_classes
         )
+
+        # GRADCAM_TARGET_LAYER may override the architecture default, but only
+        # when the named module actually exists in the built model — otherwise
+        # fall back to the default (a bad override must not break model load).
+        if settings.gradcam_target_layer:
+            known_layers = dict(model.named_modules())
+            if settings.gradcam_target_layer in known_layers:
+                target_layer = settings.gradcam_target_layer
+            else:
+                logger.warning(
+                    "gradcam_target_layer '%s' not found in %s — using default '%s'",
+                    settings.gradcam_target_layer,
+                    settings.model_architecture,
+                    target_layer,
+                )
 
         # weights_only=True blocks pickle gadget chains: a malicious or
         # corrupted checkpoint can never execute arbitrary code during load.
@@ -263,24 +330,30 @@ class ModelService:
 
         start = time.time()
         tensor = torch.from_numpy(input_np).float().to(self._device)
+        tensor.requires_grad_(True)
 
-        with torch.no_grad():
-            output = self._model(tensor)
-            probs = F.softmax(output, dim=1)[0].cpu().numpy()
+        # Single forward pass: the same graph feeds both the softmax output
+        # and the Grad-CAM backward pass (previously the network ran twice
+        # per prediction, doubling inference cost).
+        output = self._model(tensor)
+        probs = F.softmax(output, dim=1)[0].detach().cpu().numpy()
 
-        predicted_class = int(np.argmax(probs))
+        if len(probs) == 2:
+            # Calibrated binary decision boundary (MODEL_DECISION_THRESHOLD):
+            # argmax@0.5 over-predicts the abnormal class on out-of-
+            # distribution images because the training set is class- and
+            # style-imbalanced. The threshold is tuned on held-out data to
+            # cut false positives while preserving sensitivity. Grad-CAM is
+            # computed for the class actually returned.
+            threshold = float(settings.model_decision_threshold)
+            predicted_class = int(probs[1] >= threshold)
+        else:
+            predicted_class = int(np.argmax(probs))
         confidence = float(probs[predicted_class])
-        cam = self._generate_gradcam_cnn(input_np, predicted_class)
+        cam = self._gradcam.from_logits(output, predicted_class)
         elapsed_ms = (time.time() - start) * 1000
 
         return self._pack(predicted_class, confidence, probs, cam, elapsed_ms)
-
-    def _generate_gradcam_cnn(self, input_np: np.ndarray, class_idx: int) -> np.ndarray:
-        import torch
-
-        tensor = torch.from_numpy(input_np).float().to(self._device)
-        tensor.requires_grad_(True)
-        return self._gradcam.generate(tensor, class_idx)
 
     # -------------------------------------------------- heuristic path
     def _predict_heuristic(self, input_np: np.ndarray) -> Dict[str, Any]:
@@ -351,12 +424,26 @@ class ModelService:
         p_normal = 1.0 - p_abnormal
 
         classes = settings.model_classes or ["Normal", "Pneumonia"]
-        if classes[1:]:
-            probs = [p_normal, p_abnormal][: len(classes)]
-            predicted_class = int(np.argmax(probs))
-        else:
-            probs = [p_abnormal]
-            predicted_class = 0
+        if len(classes) != 2:
+            # The heuristic models exactly two outcomes (normal vs abnormal).
+            # With any other MODEL_CLASSES count the probability vector would
+            # silently truncate or mislabel classes — fail loudly instead.
+            raise RuntimeError(
+                "The heuristic engine supports exactly two MODEL_CLASSES "
+                f"(got {len(classes)}). Use the CNN model for other class sets."
+            )
+        # Align the two probabilities to MODEL_CLASSES order (index of the
+        # "normal" class, case-insensitive; defaults to index 0 if absent) so
+        # class_name labels never flip for a reversed class list.
+        normal_index = 0
+        for i, name in enumerate(classes):
+            if name.strip().lower() == "normal":
+                normal_index = i
+                break
+        probs = [0.0, 0.0]
+        probs[normal_index] = p_normal
+        probs[1 - normal_index] = p_abnormal
+        predicted_class = int(np.argmax(probs))
 
         confidence = float(probs[predicted_class])
         elapsed_ms = (time.time() - start) * 1000

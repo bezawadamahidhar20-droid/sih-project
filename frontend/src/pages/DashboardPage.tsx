@@ -32,6 +32,7 @@ import { StatCardSkeleton } from '../components/common/Skeletons';
 import { ClinicalSafetyBanner } from '../components/common/ClinicalSafetyBanner';
 import { CountUp } from '../components/common/CountUp';
 import { SplitText } from '../components/common/SplitText';
+import { TiltCard } from '../components/common/TiltCard';
 
 function timeAgo(dateStr: string) {
   const diffMs = Date.now() - new Date(dateStr).getTime();
@@ -167,44 +168,53 @@ export function DashboardPage() {
                     type: 'spring',
                     bounce: 0,
                     duration: 0.45,
-                    // No stagger delay for reduced-motion users — instant fade
                     delay: prefersReducedMotion ? 0 : idx * 0.06,
                   }}
                   style={{ height: '100%' }}
                 >
-                <Card
-                  sx={{
-                    p: 2.5,
-                    borderRadius: 3,
-                    height: '100%',
-                    '&:hover': {
-                      boxShadow: '0 14px 28px -10px rgba(15,36,48,0.18)',
-                      transform: 'translateY(-2px)',
-                    },
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 2,
-                      bgcolor: alpha(kpi.color, 0.1),
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      mb: 1.75,
-                      transition: 'transform .2s ease',
-                    }}
-                  >
-                    <kpi.icon sx={{ color: kpi.color, fontSize: 22 }} />
-                  </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    {kpi.label}
-                  </Typography>
-                  <Typography variant="h2" sx={{ mt: 0.25, fontVariantNumeric: 'tabular-nums' }}>
-                    <CountUp to={kpi.value} duration={1.4} />
-                  </Typography>
-                </Card>
+                  <TiltCard maxTilt={10} scale={1.03} sx={{ height: '100%' }}>
+                    <Card
+                      className="glass-panel"
+                      sx={{
+                        p: 2.5,
+                        borderRadius: 4,
+                        height: '100%',
+                        border: '1px solid rgba(15, 92, 140, 0.15)',
+                        boxShadow: '0 8px 24px rgba(15, 36, 48, 0.06)',
+                        transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                        '&:hover': {
+                          boxShadow: '0 20px 40px -10px rgba(15,36,48,0.2)',
+                          borderColor: 'rgba(15, 92, 140, 0.4)',
+                          '& .kpi-icon-box': {
+                            transform: 'scale(1.12) rotate(5deg)',
+                          },
+                        },
+                      }}
+                    >
+                      <Box
+                        className="kpi-icon-box"
+                        sx={{
+                          width: 46,
+                          height: 46,
+                          borderRadius: 3,
+                          bgcolor: alpha(kpi.color, 0.14),
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mb: 1.75,
+                          transition: 'transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                        }}
+                      >
+                        <kpi.icon sx={{ color: kpi.color, fontSize: 24 }} />
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700 }}>
+                        {kpi.label}
+                      </Typography>
+                      <Typography variant="h2" sx={{ mt: 0.25, fontVariantNumeric: 'tabular-nums', fontWeight: 800 }}>
+                        <CountUp to={kpi.value} duration={1.4} />
+                      </Typography>
+                    </Card>
+                  </TiltCard>
                 </motion.div>
               </Grid>
             ))}
@@ -243,6 +253,14 @@ export function DashboardPage() {
                   <Typography variant="body2" color="text.secondary">Compute device</Typography>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{health.device}</Typography>
                 </Stack>
+                {health.model_decision_threshold != null && (
+                  <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">Decision threshold</Typography>
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                      {Math.round(health.model_decision_threshold * 100)}%
+                    </Typography>
+                  </Stack>
+                )}
                 <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                   <Typography variant="body2" color="text.secondary">API version</Typography>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{health.version}</Typography>
@@ -251,6 +269,34 @@ export function DashboardPage() {
                   <Alert severity="warning" variant="outlined">
                     Baseline heuristic engine is active (dev-only). Predictions are not clinical-grade.
                   </Alert>
+                )}
+                {health.model_metrics && (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Typography variant="overline" color="text.secondary">
+                      Validated performance · {health.model_metrics.num_samples ?? '—'} test images
+                    </Typography>
+                    <Stack spacing={1.25} sx={{ mt: 1 }}>
+                      {[
+                        { label: 'Accuracy', value: health.model_metrics.accuracy },
+                        { label: 'Sensitivity (recall)', value: health.model_metrics.sensitivity },
+                        { label: 'Specificity', value: health.model_metrics.specificity },
+                        { label: 'ROC-AUC', value: health.model_metrics.auc },
+                      ].map((m) =>
+                        m.value != null ? (
+                          <Stack key={m.label} direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Typography variant="body2" color="text.secondary">{m.label}</Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                              {Math.round(m.value * 100)}%
+                            </Typography>
+                          </Stack>
+                        ) : null
+                      )}
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                      Measured on a held-out test split — see <code>&lt;model&gt;.evaluation.json</code>.
+                    </Typography>
+                  </>
                 )}
               </Stack>
             )}

@@ -10,7 +10,6 @@ import {
   Button,
   Alert,
   Divider,
-  Chip,
   CircularProgress,
   LinearProgress,
 } from '@mui/material';
@@ -32,6 +31,7 @@ import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PredictResponse, Scan } from '../types';
 import { ScanViewer } from '../components/scan/ScanViewer';
+import { VerdictHero } from '../components/scan/VerdictHero';
 import { ConfidenceMeter } from '../components/scan/ConfidenceMeter';
 import { ClinicalSafetyBanner, BannerVariant } from '../components/common/ClinicalSafetyBanner';
 import { ClinicalFlagsRow } from '../components/common/StatusChip';
@@ -56,14 +56,17 @@ export function ResultsPage() {
   const [processingStep, setProcessingStep] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isDoctor = hasRole(['doctor', 'radiologist']);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (stepTimerRef.current) clearInterval(stepTimerRef.current);
+    if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     pollRef.current = null;
     stepTimerRef.current = null;
+    pollTimeoutRef.current = null;
   }, []);
 
   const startStepAnimation = useCallback(() => {
@@ -73,6 +76,54 @@ export function ResultsPage() {
     }, 900);
   }, []);
 
+  const applyResult = useCallback(
+    (res: PredictResponse) => {
+      stopPolling();
+      setResult(res);
+      setScan(res.scan);
+      setStatus('ready');
+    },
+    [stopPolling]
+  );
+
+  const pollWhileProcessing = useCallback(
+    async (id: number) => {
+      const deadline = Date.now() + 120_000;
+      const wait = (ms: number) =>
+        new Promise<void>((resolve) => {
+          pollTimeoutRef.current = setTimeout(resolve, ms);
+        });
+      const tick = async (): Promise<void> => {
+        if (Date.now() > deadline) {
+          stopPolling();
+          setError('The scan is still being analyzed. Try again shortly.');
+          setStatus('error');
+          return;
+        }
+        try {
+          const s = await api.getScan(id);
+          if (s.status === 'processing') {
+            await wait(2500);
+            return tick();
+          }
+        } catch {
+          await wait(2500);
+          return tick();
+        }
+        try {
+          const res = await api.predict(id);
+          applyResult(res);
+        } catch (err: any) {
+          stopPolling();
+          setError(err.response?.data?.detail || err.message || 'Analysis failed.');
+          setStatus('error');
+        }
+      };
+      await tick();
+    },
+    [applyResult, stopPolling]
+  );
+
   const runPrediction = useCallback(
     async (id: number) => {
       setStatus('processing');
@@ -80,17 +131,20 @@ export function ResultsPage() {
       startStepAnimation();
       try {
         const res = await api.predict(id);
-        stopPolling();
-        setResult(res);
-        setScan(res.scan);
-        setStatus('ready');
+        applyResult(res);
       } catch (err: any) {
         stopPolling();
+        if (err.response?.status === 409 && String(err.response?.data?.detail || '').includes('being processed')) {
+          // Another session is analyzing this scan right now — wait for it to
+          // finish, then load the cached result instead of showing a hard error.
+          void pollWhileProcessing(id);
+          return;
+        }
         setError(err.response?.data?.detail || err.message || 'Analysis failed.');
         setStatus('error');
       }
     },
-    [stopPolling, startStepAnimation]
+    [startStepAnimation, applyResult, stopPolling, pollWhileProcessing]
   );
 
   useEffect(() => {
@@ -201,7 +255,17 @@ export function ResultsPage() {
 
       {status === 'ready' && result && pred && (
         <Stack spacing={3}>
-          <ClinicalSafetyBanner variant={safetyVariant} subMessage={result.warning ?? undefined} />
+          <VerdictHero
+            predictedClass={pred.predicted_class}
+            confidence={pred.confidence}
+            isLowConfidence={pred.is_low_confidence}
+            isHighRisk={pred.is_high_risk}
+            isFlagged={pred.is_flagged}
+            decisionThreshold={pred.model_decision_threshold}
+          />
+          {safetyVariant !== 'normal' && (
+            <ClinicalSafetyBanner variant={safetyVariant} subMessage={result.warning ?? undefined} />
+          )}
 
           <Grid container spacing={3}>
             {/* Image viewer */}
@@ -258,13 +322,18 @@ export function ResultsPage() {
                   </Stack>
 
                   <Box sx={{ mt: 2.5 }}>
-                    <Typography variant="overline" color="text.secondary">AI-Assisted Finding</Typography>
-                    <Typography variant="h3" sx={{ mt: 0.25 }}>{pred.predicted_class}</Typography>
-                    <Chip size="small" label="Requires clinical review" sx={{ mt: 1 }} variant="outlined" />
+                    <Typography variant="overline" color="text.secondary">Confidence Breakdown</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Raw model probabilities for the reported finding and all other classes.
+                    </Typography>
                   </Box>
 
                   <Divider sx={{ my: 2.5 }} />
-                  <ConfidenceMeter confidence={pred.confidence} probabilities={pred.all_probabilities} />
+                  <ConfidenceMeter
+                    confidence={pred.confidence}
+                    probabilities={pred.all_probabilities}
+                    decisionThreshold={pred.model_decision_threshold}
+                  />
                 </Card>
 
                 {isDoctor ? (

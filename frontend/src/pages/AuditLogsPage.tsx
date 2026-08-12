@@ -36,7 +36,7 @@ export function AuditLogsPage() {
   const loadLogs = useCallback(() => {
     setLoading(true);
     setError('');
-    Promise.all([api.getScans({ page_size: 200 }), api.getPredictions({ page_size: 200 })])
+    Promise.all([api.getScans({ page_size: 1000 }), api.getPredictions({ page_size: 1000 })])
       .then(([s, p]) => {
         setScans(s.scans);
         setPredictions(p.predictions);
