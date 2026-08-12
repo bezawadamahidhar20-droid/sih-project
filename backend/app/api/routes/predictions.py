@@ -299,34 +299,57 @@ def _to_prediction_response(
     scan: Optional[Scan] = None,
 ) -> PredictionResponse:
     probs = _parse_probabilities(prediction.all_probabilities)
-    findings = [
+    
+    # Threshold for a finding to be considered present (default 0.40)
+    thresh = settings.model_decision_threshold or 0.40
+    
+    # Sort all findings by confidence descending
+    all_findings = [
         {
             "condition": cond,
             "confidence": prob,
-            "is_present": prob >= 0.4,
-            "severity": "high" if prob >= 0.75 else "moderate" if prob >= 0.4 else "low",
+            "is_present": prob >= thresh,
+            "severity": "high" if prob >= 0.75 else "moderate" if prob >= 0.40 else "low",
         }
         for cond, prob in probs.items()
     ]
+    all_findings.sort(key=lambda x: x["confidence"], reverse=True)
+
+    abnormal_findings = [f for f in all_findings if f["condition"].lower() != "normal" and f["is_present"]]
+    has_significant_findings = len(abnormal_findings) > 0 or (
+        prediction.predicted_class.lower() != "normal" and prediction.confidence >= thresh
+    )
+
+    # Co-occurring high confidence findings handling (>70%)
+    high_conf_findings = [f["condition"] for f in abnormal_findings if f["confidence"] >= 0.70]
+    if len(high_conf_findings) >= 2:
+        predicted_display = f"Co-occurring Findings: {' + '.join(high_conf_findings)}"
+    elif not has_significant_findings:
+        predicted_display = "No significant findings"
+    else:
+        predicted_display = prediction.predicted_class
+
     condition_heatmaps = (
         {cond: f"/api/v1/predictions/{prediction.id}/heatmap/{cond}" for cond in probs.keys()}
         if gradcam_url
         else None
     )
 
-    explanation = (
-        f"Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation and inflammatory opacity."
-        if "Pneumonia" in prediction.predicted_class
-        else f"Model attention is uniformly distributed across clear pulmonary parenchyma with no acute focal opacity."
-    )
+    if not has_significant_findings:
+        explanation = "Model attention is uniformly distributed across clear pulmonary parenchyma with no acute focal opacity or significant pathological findings detected."
+    elif "Pneumonia" in predicted_display:
+        explanation = "Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation and inflammatory opacity."
+    else:
+        explanation = f"Model attention is localized to regions supporting clinical findings of {predicted_display}."
 
     return PredictionResponse(
         id=prediction.id,
         scan_id=prediction.scan_id,
-        predicted_class=prediction.predicted_class,
+        predicted_class=predicted_display,
         confidence=prediction.confidence,
         all_probabilities=probs,
-        findings=findings,
+        findings=all_findings,
+        has_significant_findings=has_significant_findings,
         condition_heatmaps=condition_heatmaps,
         explanation=explanation,
         gradcam_url=gradcam_url,

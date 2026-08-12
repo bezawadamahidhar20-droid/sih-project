@@ -41,7 +41,7 @@ class TestFullPredictionFlow:
         data = predict.json()
 
         pred = data["prediction"]
-        assert pred["predicted_class"] in ("Normal", "Pneumonia")
+        assert pred["predicted_class"] in ("Normal", "Pneumonia", "No significant findings")
         assert 0.0 <= pred["confidence"] <= 1.0
         assert pred["model_architecture"] in ("baseline-heuristic", "resnet50")
         assert set(pred["all_probabilities"].keys()) == {"Normal", "Pneumonia"}

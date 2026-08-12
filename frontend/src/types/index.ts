@@ -55,6 +55,7 @@ export interface Prediction {
   confidence: number;
   all_probabilities: Record<string, number>;
   findings?: PredictionFinding[];
+  has_significant_findings?: boolean;
   condition_heatmaps?: Record<string, string> | null;
   explanation?: string | null;
   gradcam_url: string | null;

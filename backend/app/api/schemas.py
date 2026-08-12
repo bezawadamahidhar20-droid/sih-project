@@ -139,6 +139,7 @@ class PredictionResponse(_UtcOffsetSerialization, BaseModel):
     confidence: float
     all_probabilities: Dict[str, float]
     findings: List[Dict[str, Any]] = []
+    has_significant_findings: bool = True
     condition_heatmaps: Optional[Dict[str, str]] = None
     explanation: Optional[str] = None
     gradcam_url: Optional[str] = None

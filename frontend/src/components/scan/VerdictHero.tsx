@@ -86,18 +86,17 @@ export function VerdictHero({
   normalClass = 'Normal',
   findings,
 }: VerdictHeroProps) {
-  const isNormal = predictedClass === normalClass;
-  const abnormal = !isNormal;
+  const isNoFindings = predictedClass.toLowerCase().includes('no significant findings') || predictedClass === normalClass;
+  const isCoOccurring = predictedClass.toLowerCase().includes('co-occurring');
+  const abnormal = !isNoFindings;
 
-  // Severity treatment: calm success for normal, amber warning for abnormal
-  // but low-confidence, red critical for high-risk abnormal, info for flagged.
   const tone = isFlagged
     ? { color: theme.palette.info.main, soft: theme.palette.info.light, icon: ScienceRoundedIcon, label: 'Flagged for review' }
-    : isHighRisk
-    ? { color: theme.palette.error.main, soft: theme.palette.error.light, icon: ReportRoundedIcon, label: 'High-priority finding' }
+    : isHighRisk || isCoOccurring
+    ? { color: theme.palette.error.main, soft: theme.palette.error.light, icon: ReportRoundedIcon, label: isCoOccurring ? 'Co-occurring findings' : 'High-priority finding' }
     : abnormal
     ? { color: theme.palette.warning.main, soft: theme.palette.warning.light, icon: WarningAmberRoundedIcon, label: 'Abnormal finding' }
-    : { color: theme.palette.success.main, soft: theme.palette.success.light, icon: CheckCircleRoundedIcon, label: 'Normal finding' };
+    : { color: theme.palette.success.main, soft: theme.palette.success.light, icon: CheckCircleRoundedIcon, label: 'No significant findings' };
 
   const Icon = tone.icon;
   const pct = Math.round(confidence * 100);

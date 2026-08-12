@@ -332,23 +332,23 @@ class ModelService:
         tensor = torch.from_numpy(input_np).float().to(self._device)
         tensor.requires_grad_(True)
 
-        # Single forward pass: the same graph feeds both the softmax output
-        # and the Grad-CAM backward pass (previously the network ran twice
-        # per prediction, doubling inference cost).
+        # Single forward pass: the same graph feeds both the activation output
+        # and the Grad-CAM backward pass.
         output = self._model(tensor)
-        probs = F.softmax(output, dim=1)[0].detach().cpu().numpy()
+        
+        # Independent Sigmoid activations for multi-label outputs; Softmax for single-class softmax
+        sigmoid_probs = torch.sigmoid(output)[0].detach().cpu().numpy()
+        softmax_probs = F.softmax(output, dim=1)[0].detach().cpu().numpy()
 
-        if len(probs) == 2:
-            # Calibrated binary decision boundary (MODEL_DECISION_THRESHOLD):
-            # argmax@0.5 over-predicts the abnormal class on out-of-
-            # distribution images because the training set is class- and
-            # style-imbalanced. The threshold is tuned on held-out data to
-            # cut false positives while preserving sensitivity. Grad-CAM is
-            # computed for the class actually returned.
+        if len(softmax_probs) == 2:
             threshold = float(settings.model_decision_threshold)
+            probs = softmax_probs
             predicted_class = int(probs[1] >= threshold)
         else:
+            # Multi-label independent condition probabilities via sigmoid
+            probs = sigmoid_probs
             predicted_class = int(np.argmax(probs))
+
         confidence = float(probs[predicted_class])
         cam = self._gradcam.from_logits(output, predicted_class)
         elapsed_ms = (time.time() - start) * 1000
