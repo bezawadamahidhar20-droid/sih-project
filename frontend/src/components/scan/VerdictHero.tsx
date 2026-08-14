@@ -8,6 +8,7 @@ import ReportRoundedIcon from '@mui/icons-material/ReportRounded';
 import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import ScienceRoundedIcon from '@mui/icons-material/ScienceRounded';
 import { theme } from '../../theme';
+import type { PredictionFinding } from '../../types';
 
 interface VerdictHeroProps {
   predictedClass: string;
@@ -17,6 +18,7 @@ interface VerdictHeroProps {
   isFlagged: boolean;
   decisionThreshold?: number | null;
   normalClass?: string;
+  findings?: PredictionFinding[];
 }
 
 // Radial gauge: sweeps the arc to the confidence value with a critically

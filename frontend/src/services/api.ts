@@ -24,18 +24,17 @@ import {
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 // ---------------------------------------------------------------------------
-// Demo-mode data store. This ONLY activates when the real FastAPI backend at
-// API_BASE_URL is unreachable (network error) AND the app was explicitly
-// built/run with VITE_DEMO_MODE=1. The exact same API surface
-// (methods/params/response shapes) is used whether wired to a live backend
-// or previewed standalone. Every method below still attempts the real HTTP
-// call first.
+// Demo-mode data store. This ONLY activates when ALL of these hold:
+//   1. the app was explicitly built/run with VITE_DEMO_MODE=1, AND
+//   2. the real FastAPI backend at API_BASE_URL is genuinely unreachable
+//      (a network error — no HTTP response at all).
 //
-// Without VITE_DEMO_MODE, a network error is surfaced as an error instead of
-// being silently swapped for fabricated predictions — a medical UI must never
-// invent results.
+// A backend HTTP 400/401/403/404/409/422/429/500, a malformed response, a
+// database error, an inference error — ANY real server answer — surfaces as
+// a real error and NEVER becomes a fake prediction / fake login / fake
+// health payload. A medical UI must never invent results.
 // ---------------------------------------------------------------------------
-const DEMO_MODE_ENABLED = true;
+const DEMO_MODE_ENABLED = import.meta.env.VITE_DEMO_MODE === '1';
 
 let demoMode = false;
 const demoScans = generateMockScans(26);
@@ -47,8 +46,13 @@ function isNetworkError(err: unknown): boolean {
   return !!e && !e.response;
 }
 
+/**
+ * Demo fallback is allowed ONLY when demo mode is explicitly enabled AND the
+ * backend is genuinely unreachable (no HTTP response). Any HTTP status — even
+ * a 500 — means the backend IS reachable and its error is surfaced as-is.
+ */
 function canFallbackToDemo(err: unknown): boolean {
-  return isNetworkError(err) || DEMO_MODE_ENABLED;
+  return DEMO_MODE_ENABLED && isNetworkError(err);
 }
 
 class ApiService {
@@ -116,6 +120,22 @@ class ApiService {
   }
 
   logout(): void {
+    // Server-side revocation: tell the backend to burn the refresh token so
+    // it can never be replayed, then drop local state. Fire-and-forget with
+    // a plain axios call (no interceptors, no refresh loop) — a network
+    // failure here must not block local sign-out.
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (refreshToken) {
+      axios
+        .post(
+          `${API_BASE_URL}/auth/logout`,
+          { refresh_token: refreshToken },
+          { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+        )
+        .catch(() => {
+          /* local cleanup happens regardless */
+        });
+    }
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
@@ -138,8 +158,13 @@ class ApiService {
       localStorage.removeItem('demo_mode');
       return response.data;
     } catch (err) {
-      // Always fall back to demo auth if the backend is unreachable or demo mode is on.
-      // This ensures the SIH demo works without needing a live backend.
+      // Demo authentication happens ONLY when demo mode is explicitly enabled
+      // AND the backend is genuinely unreachable (network error). A backend
+      // 401/403/500/database outage must NEVER become a successful login —
+      // those errors propagate to the caller as real failures.
+      if (!canFallbackToDemo(err)) {
+        throw err;
+      }
       const usernameKey = (credentials.username ?? '').toLowerCase();
       const entry = DEMO_USERS[usernameKey];
       if (!entry || entry.password !== credentials.password) {
@@ -446,6 +471,9 @@ class ApiService {
       if ((data as any).status === 'healthy') (data as any).status = 'ok';
       return data;
     } catch (err) {
+      // Health data must come from the real backend. Fake GPU/model status is
+      // only shown in explicitly-enabled demo mode when the backend is
+      // unreachable — a real server error is surfaced instead.
       if (!canFallbackToDemo(err)) throw err;
       demoMode = true;
       localStorage.setItem('demo_mode', '1');

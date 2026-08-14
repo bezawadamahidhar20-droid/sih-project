@@ -86,12 +86,16 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
   access; staff upload-only + their own scans), AES-256 (Fernet) encryption at
   rest, DICOM PHI anonymization, structured audit logging without PHI.
 - **Refresh-token rotation & tokens you can revoke**: refresh tokens are
-  one-time-use (`jti` rotation — replaying a used token returns 401), and a
-  `token_version` claim lets a password or role/status change revoke *every*
-  outstanding access + refresh token instantly. Login failures are keyed on
-  the proxy-aware client IP and bcrypt timing is equalized for unknown
-  usernames, so neither lockouts nor account-existence probing can follow a
-  spoofed or shared proxy address.
+  one-time-use (`jti` rotation) and every API-minted refresh token is tracked
+  in a persistent `refresh_sessions` table — replaying a used token returns
+  401 **and revokes the whole session family** (all outstanding refresh
+  tokens + a `token_version` bump that kills access tokens too), surviving
+  restarts and horizontal scaling. `POST /auth/logout` burns the presented
+  refresh token server-side. A `token_version` claim lets a password or
+  role/status change revoke *every* outstanding access + refresh token
+  instantly. Login failures are keyed on the proxy-aware client IP and
+  bcrypt timing is equalized for unknown usernames, so neither lockouts nor
+  account-existence probing can follow a spoofed or shared proxy address.
 - **Clinical safety UX**: predictions below the 70% confidence threshold are
   flagged, high-risk findings are emphasized, and doctors can flag results for
   review. Model selection during training prioritizes **sensitivity** (minimize
@@ -170,11 +174,16 @@ npm run dev        # http://localhost:5173
 ```
 
 The Vite dev server proxies `/api` → `http://localhost:8000`, so the UI works
-against a locally running backend out of the box (no CORS, no env vars). For
-frontend-only work without a backend, run `VITE_DEMO_MODE=1 npm run dev` — the
-app then falls back to bundled mock data with an unmissable **DEMO MODE**
-banner. Demo fallback is off by default: without the flag, network errors are
-surfaced instead of silently showing fabricated predictions.
+against a locally running backend out of the box (no CORS, no env vars).
+
+**Demo mode is strictly opt-in.** Run `VITE_DEMO_MODE=1 npm run dev` to enable
+it: the app then falls back to bundled mock data **only when the backend is
+genuinely unreachable (network error)** and shows an unmissable **DEMO MODE —
+results are simulated** banner. Demo mode is OFF by default (`VITE_DEMO_MODE`
+unset): every real server response — 400/401/403/404/409/422/429/500,
+malformed payloads, DB or inference failures — is surfaced as a real error
+and is **never** replaced with fabricated logins, predictions, heatmaps, or
+health data. A backend HTTP 500 can never become a successful demo login.
 
 ### 3. Verify it works
 
@@ -215,11 +224,12 @@ All routes are prefixed with `/api/v1`. JWT access tokens are returned by
 | `POST /auth/register` | doctor/radiologist | create user |
 | `PATCH /auth/me` | any role | update own `email` / `full_name` only |
 | `POST /auth/change-password` | any role | change own password (current password required) |
+| `POST /auth/logout` | public (revokes presented refresh token) | server-side sign-out; burned refresh tokens can never be replayed |
 | `POST /scans/upload` | any role | upload scan (encrypted at rest) |
 | `GET /scans/` | any role | list scans (staff: own only) |
 | `POST /predictions/predict/{id}` | any role | run inference + Grad-CAM |
 | `GET /predictions/` | any role | list predictions (staff: own only) |
-| `POST /predictions/{id}/flag` | doctor/radiologist | flag for review |
+| `POST /predictions/{id}/flag` | doctor/radiologist | flag for review — owner/creator only (see object-level authorization) |
 | `GET /predictions/patient/{pid}/history` | doctor/radiologist | per-patient history |
 | `GET /health` | public | engine / model status |
 
@@ -296,9 +306,8 @@ docker compose up --build
 * Demo accounts are **not** seeded by default (`SEED_DEMO_USERS=false`).
 
 * Frontend: http://localhost:8080 (nginx serves the SPA, proxies `/api`)
-* Backend API: http://localhost:8000/docs (dev convenience mapping; remove
-  the `BACKEND_PORT` mapping in production so the API is only reachable
-  through the nginx proxy)
+* Backend API: NOT exposed on a host port — reachable only through the nginx
+  proxy (Intranet/HTTPS proxy -> frontend -> backend).
 * Postgres is internal to the compose network; scans persist in named volumes.
 * HTTPS/TLS: terminate at a reverse proxy / load balancer in front of the
   stack (`SSL_CERTFILE`/`SSL_KEYFILE` in the backend `.env` can also enable
@@ -338,14 +347,25 @@ docker-compose.yml   # postgres + backend + frontend
 - **PHI anonymization**: DICOM files are de-identified with a **whitelist**
   (only safe tags + pixel data survive) and the *anonymized* file is what gets
   encrypted and stored — the original bytes never touch disk. Private/vendor
-  tags and all patient identifiers are dropped.
+  tags and all patient identifiers are dropped; the institution-assigned
+  **Study ID is removed** and the Study/Series/SOP Instance **UIDs are
+  replaced** with fresh values so the stored file cannot be re-linked to the
+  original study. **Multi-frame DICOM (e.g. CT volumes) is explicitly
+  rejected** at upload with an actionable message — the pipeline never
+  silently analyzes a single frame of a volume.
 - **Encryption**: uploaded scans **and derived images** (the `original_*.png` /
   `gradcam_*.png` renders) are encrypted with AES-256 (Fernet) at rest;
-  decryption happens only transiently in memory while serving.
+  decryption happens only transiently in memory while serving (the PDF
+  report is assembled from in-memory decrypted bytes — no plaintext PHI is
+  ever written to disk).
 - **RBAC & object-level authorization**: doctor/radiologist = full diagnostic
-  access; staff = upload + own scans only — enforced on scan listings,
-  predictions, and image serving. Users can only edit `email`/`full_name` on
-  their own account; role changes are doctor/radiologist-only.
+  access (listings, detail, patient history); staff = upload + own scans only.
+  Destructive / PHI-exporting endpoints are stricter and **owner-scoped**: a
+  prediction's PDF, heatmap, flag action, and scan deletion are only allowed
+  for the prediction's creator or the scan's uploader — another clinician is
+  answered with a plain 404 so record existence is never disclosed. Users can
+  only edit `email`/`full_name` on their own account; role changes are
+  doctor/radiologist-only.
 - **Brute-force protection**: `POST /auth/login` is rate-limited per
   IP + username (5 failures / 15 min, in-process — swap for Redis/nginx when
   scaling horizontally). The client key is proxy-aware: behind nginx the last

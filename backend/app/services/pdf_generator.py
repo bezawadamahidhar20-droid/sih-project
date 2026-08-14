@@ -18,8 +18,8 @@ def generate_prediction_pdf(
     anonymized_patient_id: Optional[str],
     modality: Optional[str],
     body_part: Optional[str],
-    original_image_path: Optional[Path],
-    gradcam_image_path: Optional[Path],
+    original_image_bytes: Optional[bytes] = None,
+    gradcam_image_bytes: Optional[bytes] = None,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -148,19 +148,21 @@ def generate_prediction_pdf(
         story.append(exp_table)
         story.append(Spacer(1, 12))
 
-    # Images (Original Scan + Grad-CAM Heatmap side by side)
+    # Images (Original Scan + Grad-CAM Heatmap side by side). The caller
+    # passes already-decrypted image BYTES (never plaintext file paths), so
+    # the PDF is assembled from memory and no decrypted PHI ever touches disk.
     img_cells = []
-    if original_image_path and original_image_path.exists():
+    if original_image_bytes:
         try:
-            img_cells.append(RLImage(str(original_image_path), width=240, height=240))
+            img_cells.append(RLImage(io.BytesIO(original_image_bytes), width=240, height=240))
         except Exception:
             img_cells.append(Paragraph("Patient Scan Image", body_style))
     else:
         img_cells.append(Paragraph("Patient Scan Image", body_style))
 
-    if gradcam_image_path and gradcam_image_path.exists():
+    if gradcam_image_bytes:
         try:
-            img_cells.append(RLImage(str(gradcam_image_path), width=240, height=240))
+            img_cells.append(RLImage(io.BytesIO(gradcam_image_bytes), width=240, height=240))
         except Exception:
             img_cells.append(Paragraph("Grad-CAM Heatmap Image", body_style))
     else:

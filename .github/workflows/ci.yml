@@ -54,7 +54,12 @@ jobs:
           cd frontend
           npm ci
 
-      - name: Run Vite build & typecheck
+      - name: Typecheck
+        run: |
+          cd frontend
+          npx tsc --noEmit
+
+      - name: Run Vite build
         run: |
           cd frontend
           npm run build

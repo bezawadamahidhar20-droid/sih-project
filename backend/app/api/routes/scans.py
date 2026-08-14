@@ -19,7 +19,7 @@ from app.core.security import encrypt_file
 from app.core.logging import audit_logger, get_logger
 from app.db.session import get_db
 from app.db.models import Scan, Prediction, User, UserRole
-from app.services.image_processing import load_image
+from app.services.image_processing import load_image, DicomUnsupportedError
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -100,6 +100,15 @@ async def upload_scan(
     
     try:
         image, dicom_metadata, persist_path = load_image(temp_path)
+    except DicomUnsupportedError as e:
+        # Multi-frame volumes are rejected with an actionable message rather
+        # than a generic "corrupted file" (never silently analyzed frame 0).
+        os.remove(temp_path)
+        logger.info("Unsupported DICOM rejected (scan upload): %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         os.remove(temp_path)
         logger.error(f"Failed to load image: {e}")
@@ -166,7 +175,9 @@ async def upload_scan(
         user_id=str(current_user.id),
         user_role=current_user.role.value,
         file_hash=file_hash,
-        filename=file.filename,
+        # PHI guard: log only the sanitized extension, never the raw
+        # client-supplied filename (which could embed a patient name).
+        file_extension=os.path.splitext(file.filename)[1].lower() or "unknown",
         file_size=file_size,
         mime_type=scan.mime_type
     )
@@ -255,6 +266,13 @@ async def delete_scan(
     scan = result.scalar_one_or_none()
     
     if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    # IDOR guard: only the clinician who uploaded the scan may delete it. A
+    # peer must not be able to destroy another doctor's studies (or the
+    # prediction / encrypted artifacts attached to them). Denied with a plain
+    # 404 so resource existence is not disclosed.
+    if scan.uploaded_by != current_user.id:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     # Cascade cleanup: remove the associated prediction (FK), the derived

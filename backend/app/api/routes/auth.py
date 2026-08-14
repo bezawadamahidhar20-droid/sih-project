@@ -1,27 +1,31 @@
 from collections import defaultdict
+from datetime import timedelta
 from time import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import get_current_active_user, require_roles
 from app.api.schemas import (
     UserCreate, UserResponse, UserUpdate, UserSelfUpdate, ChangePasswordRequest,
-    Token, LoginRequest, RefreshTokenRequest,
+    Token, LoginRequest, RefreshTokenRequest, LogoutRequest,
 )
+from app.core.config import get_settings
 from app.core.netutil import client_ip
 from app.core.security import (
     verify_password, get_password_hash,
-    create_access_token, create_refresh_token, decode_token
+    create_access_token, create_refresh_token, create_refresh_token_with_jti,
+    decode_token
 )
 from app.core.timeutil import utcnow
 from app.db.session import get_db
-from app.db.models import User, UserRole
+from app.db.models import User, UserRole, RefreshSession
 from app.core.logging import audit_logger
 
+settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 # ---------------------------------------------------------------------------
@@ -35,9 +39,12 @@ _LOGIN_FAILURES: Dict[str, List[float]] = defaultdict(list)
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 15 * 60  # 15 minutes
 
-# One-time-use refresh tokens (rotation): jti -> expiry epoch. In-memory like
-# the login limiter — adequate for the single-worker stack; swap for Redis
-# when scaling horizontally. Bounded below by expiring + a hard cap.
+# One-time-use refresh tokens (rotation): jti -> expiry epoch. Legacy
+# in-process store kept ONLY as a backstop for refresh tokens minted before
+# the persistent RefreshSession table existed (e.g. tests that call
+# create_refresh_token directly). API-minted tokens are tracked in the DB
+# (see RefreshSession), which survives restarts and scales horizontally.
+# Bounded below by expiring + a hard cap.
 _CONSUMED_REFRESH_JTIS: Dict[str, float] = {}
 _MAX_CONSUMED_JTIS = 10_000
 
@@ -98,6 +105,49 @@ def _register_login_failure(key: str) -> None:
 
 def _clear_login_failures(key: str) -> None:
     _LOGIN_FAILURES.pop(key, None)
+
+
+async def _persist_refresh_session(db: AsyncSession, user_id: int, jti: str) -> None:
+    """Record a newly-issued refresh token in durable storage.
+
+    DB columns store naive-UTC (matching the rest of the schema, see
+    ``utcnow``), so expiry is computed with ``utcnow()`` — never mix aware
+    datetimes into the ``DateTime`` columns.
+    """
+    db.add(
+        RefreshSession(
+            user_id=user_id,
+            jti=jti,
+            expires_at=utcnow() + timedelta(days=settings.jwt_refresh_token_expire_days),
+        )
+    )
+
+
+async def _prune_expired_refresh_sessions(db: AsyncSession) -> None:
+    """Bound table growth: drop expired rows occasionally (once per login)."""
+    await db.execute(
+        delete(RefreshSession).where(RefreshSession.expires_at < utcnow())
+    )
+
+
+async def _revoke_refresh_session(db: AsyncSession, jti: str) -> bool:
+    """Mark a refresh token consumed. Returns True if a DB row existed."""
+    result = await db.execute(select(RefreshSession).where(RefreshSession.jti == jti))
+    row = result.scalar_one_or_none()
+    if row is None:
+        return False
+    if row.revoked_at is None:
+        row.revoked_at = utcnow()
+    return True
+
+
+async def _revoke_all_user_sessions(db: AsyncSession, user_id: int) -> None:
+    """Revoke every outstanding refresh session for a user (family kill)."""
+    await db.execute(
+        update(RefreshSession)
+        .where(RefreshSession.user_id == user_id, RefreshSession.revoked_at.is_(None))
+        .values(revoked_at=utcnow())
+    )
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -186,14 +236,16 @@ async def login(
 
     _clear_login_failures(key)
     user.last_login = utcnow()
-    await db.commit()
 
     access_token = create_access_token(
         data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
     )
-    refresh_token = create_refresh_token(
+    refresh_token, refresh_jti = create_refresh_token_with_jti(
         data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
     )
+    await _persist_refresh_session(db, user.id, refresh_jti)
+    await _prune_expired_refresh_sessions(db)
+    await db.commit()
 
     audit_logger.log_auth("login", user_id=str(user.id), username=user.username, success=True)
 
@@ -217,19 +269,37 @@ async def refresh_token(
             detail="Invalid refresh token"
         )
 
-    # Rotation: each refresh token is single-use. The consumed check AND the
-    # mark happen back-to-back with NO await in between, so two concurrent
-    # refreshes with the same token cannot both pass (burn-then-verify: a
-    # failed follow-up can never be replayed anyway). Legacy tokens without a
-    # jti are accepted once.
+    # Rotation + replay detection. Each refresh token is single-use.
+    #   * API-minted tokens carry a DB row (RefreshSession): a consumed row
+    #     is a REPLAY — revoke the user's whole session family and bump their
+    #     token_version so the stolen access token dies too.
+    #   * Legacy tokens (minted before RefreshSession existed) fall back to
+    #     the in-memory consumed set, burned-then-verified with no await in
+    #     between so two concurrent refreshes cannot both pass.
     jti = payload.get("jti")
+    replay = False
     if jti:
-        if jti in _CONSUMED_REFRESH_JTIS:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token already used"
-            )
-        _consume_refresh_jti(payload)
+        row_result = await db.execute(select(RefreshSession).where(RefreshSession.jti == jti))
+        row = row_result.scalar_one_or_none()
+        if row is not None:
+            now = utcnow()
+            if row.revoked_at is not None:
+                replay = True
+            elif row.expires_at < now:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token expired"
+                )
+            else:
+                row.revoked_at = now  # rotate: this token is now spent
+        else:
+            # No DB row: legacy token — use the in-memory consumed set.
+            if jti in _CONSUMED_REFRESH_JTIS:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token already used"
+                )
+            _consume_refresh_jti(payload)
 
     try:
         user_id = int(payload.get("sub") or "")
@@ -255,11 +325,33 @@ async def refresh_token(
             detail="Token revoked — please sign in again"
         )
 
+    if replay:
+        # A consumed refresh token was presented again: assume theft, kill the
+        # entire session family (every refresh token + every access token via
+        # the version bump) and reject.
+        await _revoke_all_user_sessions(db, user.id)
+        user.token_version = (user.token_version or 0) + 1
+        await db.commit()
+        audit_logger.log_auth(
+            "refresh_replay_detected", user_id=str(user.id),
+            username=user.username, success=False,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token already used — all sessions revoked, please sign in again"
+        )
+
     access_token = create_access_token(
         data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
     )
-    new_refresh_token = create_refresh_token(
+    new_refresh_token, new_refresh_jti = create_refresh_token_with_jti(
         data={"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    )
+    await _persist_refresh_session(db, user.id, new_refresh_jti)
+    await db.commit()
+
+    audit_logger.log_auth(
+        "refresh", user_id=str(user.id), username=user.username, success=True,
     )
 
     return {
@@ -267,6 +359,37 @@ async def refresh_token(
         "refresh_token": new_refresh_token,
         "token_type": "bearer"
     }
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request: LogoutRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Server-side logout: revoke the presented refresh token so it can never
+    be replayed or refreshed again. The short-lived access token naturally
+    expires on its own (default 30 min). Public + idempotent on purpose: the
+    only effect of a forged call is revoking a token the caller already
+    possessed, which is exactly what a legitimate logout should do.
+    """
+    if request.refresh_token:
+        payload = decode_token(request.refresh_token)
+        if payload and payload.get("type") == "refresh":
+            jti = payload.get("jti")
+            if jti:
+                await _revoke_refresh_session(db, jti)
+                _consume_refresh_jti(payload)
+            username = None
+            user_id = None
+            try:
+                user_id = int(payload.get("sub") or "")
+            except (TypeError, ValueError):
+                pass
+            audit_logger.log_auth(
+                "logout", user_id=str(user_id), username=username, success=True,
+            )
+            await db.commit()
+    return None
 
 
 @router.get("/me", response_model=UserResponse)

@@ -104,6 +104,12 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    """Body for POST /auth/logout. The refresh token is optional: if present
+    it is revoked server-side; the client clears local state either way."""
+    refresh_token: Optional[str] = None
+
+
 class ScanStatus(str, Enum):
     UPLOADED = "uploaded"
     PROCESSING = "processing"

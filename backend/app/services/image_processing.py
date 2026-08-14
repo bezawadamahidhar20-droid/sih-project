@@ -29,9 +29,11 @@ SAFE_TAGS = [
     (0x0018, 0x0080),  # Repetition Time
     (0x0018, 0x0081),  # Echo Time
     (0x0018, 0x1030),  # Protocol Name
-    (0x0020, 0x000D),  # Study Instance UID
-    (0x0020, 0x000E),  # Series Instance UID
-    (0x0020, 0x0010),  # Study ID
+    (0x0020, 0x000D),  # Study Instance UID (replaced below, not retained)
+    (0x0020, 0x000E),  # Series Instance UID (replaced below, not retained)
+    # Study ID (0x0020,0x0010) is NOT whitelisted: it is often an
+    # institution-assigned identifier that can embed PHI (e.g. an MRN-based
+    # accession number) — DICOM PS3.15 lists it for removal.
     (0x0020, 0x0011),  # Series Number
     (0x0020, 0x0013),  # Instance Number
     (0x0028, 0x0002),  # Samples per Pixel
@@ -55,6 +57,16 @@ _PATIENT_ID_TAGS = [
 
 _PIXEL_DATA_TAG = pydicom.tag.Tag(0x7FE0, 0x0010)  # PixelData
 
+# Instance/Study/Series UIDs are globally-unique identifiers that can be
+# linked back to the original acquisition (and therefore to PHI), so they
+# are replaced with fresh values rather than merely whitelisted. DICOM PS3.15
+# Basic Application Level Confidentiality requires replacing these.
+_UID_TAGS = [
+    (0x0008, 0x0018),  # SOP Instance UID
+    (0x0020, 0x000D),  # Study Instance UID
+    (0x0020, 0x000E),  # Series Instance UID
+]
+
 
 def anonymize_dicom(dataset: Dataset) -> Dataset:
     """Return a copy containing ONLY whitelisted tags plus pixel data.
@@ -62,6 +74,10 @@ def anonymize_dicom(dataset: Dataset) -> Dataset:
     Whitelist approach (instead of a PHI blacklist): every tag not explicitly
     deemed safe — including private/vendor tags and identifiers we forgot to
     list — is removed, so the persisted file cannot leak PHI.
+
+    In addition, Instance/Study/Series UIDs are REPLACED with freshly
+    generated values and Study ID is dropped, so the stored file cannot be
+    re-linked to the original patient by identifier.
     """
     anonymized = dataset.copy()
     keep = {pydicom.tag.Tag(*tag) for tag in SAFE_TAGS} | {_PIXEL_DATA_TAG}
@@ -75,6 +91,14 @@ def anonymize_dicom(dataset: Dataset) -> Dataset:
         if pydicom.tag.Tag(*tag) in anonymized:
             del anonymized[pydicom.tag.Tag(*tag)]
 
+    # Replace linkage UIDs with fresh values so the anonymized file cannot be
+    # correlated back to the original study by UID. The SOP Class UID is
+    # retained (needed to re-serialize) — only the *instance* UID is replaced.
+    for tag in _UID_TAGS:
+        tag_obj = pydicom.tag.Tag(*tag)
+        if tag_obj in anonymized:
+            anonymized[tag_obj].value = pydicom.uid.generate_uid()
+
     return anonymized
 
 
@@ -87,14 +111,28 @@ def extract_dicom_metadata(dataset: Dataset) -> Dict[str, Any]:
     return metadata
 
 
+class DicomUnsupportedError(ValueError):
+    """Raised for DICOM inputs this pipeline intentionally does not support
+    (e.g. multi-frame volumes), so the caller can fail loudly with a clear
+    message instead of silently analyzing the wrong frame."""
+
+
 def dicom_to_pil(dataset: Dataset) -> Image.Image:
     pixel_array = dataset.pixel_array
 
-    if pixel_array.ndim == 3:
-        if pixel_array.shape[-1] in [3, 4]:
-            # Already RGB(A) — no rescale windowing applies.
-            return Image.fromarray(normalize_pixel_array(pixel_array))
-        pixel_array = pixel_array[0]
+    if pixel_array.ndim == 3 and pixel_array.shape[-1] in [3, 4]:
+        # Single-frame RGB(A) — no rescale windowing applies.
+        return Image.fromarray(normalize_pixel_array(pixel_array))
+
+    if pixel_array.ndim != 2:
+        # Multi-frame volumes (and 4D RGB volumes): the classifier is a
+        # single-image model, so silently picking ``pixel_array[0]`` could
+        # discard clinically relevant frames. Reject explicitly instead.
+        raise DicomUnsupportedError(
+            "Multi-frame DICOM (e.g. CT volumes) is not supported for AI "
+            "analysis. Export a single 2D frame/slice as PNG or a "
+            "single-frame DICOM and retry."
+        )
 
     # Convert raw stored values to modality values using the DICOM rescale
     # parameters (e.g. CT Hounsfield units) before normalizing to uint8.
@@ -153,6 +191,10 @@ def _save_anonymized_dicom(dataset: Dataset, output_path: str) -> None:
     """
     if dataset.file_meta and getattr(dataset.file_meta, "TransferSyntaxUID", None):
         dataset.file_meta = dataset.file_meta.copy()
+        # Keep the media-storage instance UID in sync with the REPLACED
+        # SOPInstanceUID so the re-serialized header stays self-consistent.
+        if getattr(dataset.file_meta, "MediaStorageSOPInstanceUID", None):
+            dataset.file_meta.MediaStorageSOPInstanceUID = dataset.SOPInstanceUID
     try:
         dataset.save_as(output_path, enforce_file_format=True)
     except Exception as exc:

@@ -37,6 +37,81 @@ GRADCAM_DIR = os.path.join(settings.upload_dir, "gradcam")
 os.makedirs(GRADCAM_DIR, exist_ok=True)
 
 
+def _can_access_prediction(current_user: User, prediction: Prediction) -> bool:
+    """Object-level authorization shared by the resource endpoints
+    (flag / PDF / heatmap / derived images).
+
+    * staff — may only touch scans they uploaded themselves;
+    * doctor/radiologist — the prediction's creator or the scan's uploader.
+
+    A denied request is answered with a plain 404 so the existence of
+    another clinician's record is never disclosed (rule: never reveal
+    whether another user's medical record exists).
+    """
+    if current_user.role == UserRole.STAFF:
+        return prediction.scan.uploaded_by == current_user.id
+    return (
+        prediction.user_id == current_user.id
+        or prediction.scan.uploaded_by == current_user.id
+    )
+
+
+async def _can_access_scan_image(current_user: User, scan: Scan, db: AsyncSession) -> bool:
+    """Object-level authorization for derived-image files served by hash.
+
+    Same rule as :func:`_can_access_prediction`: staff see only their own
+    uploads; doctor/radiologist may fetch images for a scan they uploaded or
+    on which they created a prediction.
+    """
+    if current_user.role == UserRole.STAFF:
+        return scan.uploaded_by == current_user.id
+    if scan.uploaded_by == current_user.id:
+        return True
+    result = await db.execute(
+        select(Prediction.id).where(
+            Prediction.scan_id == scan.id,
+            Prediction.user_id == current_user.id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _build_explanation(predicted_display: str, has_significant_findings: bool) -> str:
+    """Single source of truth for the natural-language explainability block
+    (used by both the API response and the PDF export)."""
+    if not has_significant_findings:
+        return (
+            "Model attention is uniformly distributed across clear pulmonary "
+            "parenchyma with no acute focal opacity or significant pathological "
+            "findings detected."
+        )
+    if "Pneumonia" in predicted_display:
+        return (
+            "Model attention is heavily concentrated in the lower right lung "
+            "field, consistent with focal airspace consolidation and "
+            "inflammatory opacity."
+        )
+    return f"Model attention is localized to regions supporting clinical findings of {predicted_display}."
+
+
+def _load_derived_image_bytes(scan: Scan, stem: str) -> Optional[bytes]:
+    """Read a derived image (``original_<hash>.png`` / ``gradcam_<hash>.png``)
+    from the encrypted artifact, decrypting fully in memory so no plaintext
+    PHI ever touches disk. Falls back to a legacy plaintext file if one
+    exists (created before derived images were encrypted). Returns None when
+    neither exists.
+    """
+    plain = os.path.join(GRADCAM_DIR, stem)
+    encrypted = plain + ".enc"
+    if os.path.exists(encrypted):
+        with open(encrypted, "rb") as f:
+            return decrypt_data(f.read())
+    if os.path.exists(plain):
+        with open(plain, "rb") as f:
+            return f.read()
+    return None
+
+
 def _run_inference_sync(
     scan: Scan,
     temp_decrypted: str,
@@ -335,12 +410,7 @@ def _to_prediction_response(
         else None
     )
 
-    if not has_significant_findings:
-        explanation = "Model attention is uniformly distributed across clear pulmonary parenchyma with no acute focal opacity or significant pathological findings detected."
-    elif "Pneumonia" in predicted_display:
-        explanation = "Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation and inflammatory opacity."
-    else:
-        explanation = f"Model attention is localized to regions supporting clinical findings of {predicted_display}."
+    explanation = _build_explanation(predicted_display, has_significant_findings)
 
     return PredictionResponse(
         id=prediction.id,
@@ -469,6 +539,12 @@ async def flag_prediction(
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
+    # IDOR guard: a doctor must not flag/unflag another clinician's
+    # prediction (or unflag someone else's review flag). Denied with a plain
+    # 404 so resource existence is not disclosed.
+    if not _can_access_prediction(current_user, prediction):
+        raise HTTPException(status_code=404, detail="Prediction not found")
+
     # Capture the relationship while selectinload guarantees it is loaded:
     # Session.refresh() below expires attributes, and an async session cannot
     # lazy-load a relationship afterwards (MissingGreenlet -> 500).
@@ -510,12 +586,19 @@ async def download_prediction_pdf(
 
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
-    if current_user.role == UserRole.STAFF and prediction.scan.uploaded_by != current_user.id:
+
+    # IDOR guard: the PDF contains medical images — only the prediction's
+    # creator or the scan's uploader may download it (safe 404 otherwise).
+    if not _can_access_prediction(current_user, prediction):
         raise HTTPException(status_code=404, detail="Prediction not found")
 
     scan = prediction.scan
-    original_path = Path(settings.upload_dir) / f"original_{scan.file_hash}.png"
-    gradcam_path = Path(settings.gradcam_dir) / f"gradcam_{scan.file_hash}.png"
+
+    # Derived images are stored encrypted at rest (``<name>.png.enc``);
+    # decrypt fully in memory so the PDF is assembled from plaintext bytes
+    # that never touch disk (no temp-file cleanup race, no leaked PHI).
+    original_bytes = _load_derived_image_bytes(scan, f"original_{scan.file_hash}.png")
+    gradcam_bytes = _load_derived_image_bytes(scan, f"gradcam_{scan.file_hash}.png")
 
     from app.services.pdf_generator import generate_prediction_pdf
     pdf_bytes = generate_prediction_pdf(
@@ -524,13 +607,13 @@ async def download_prediction_pdf(
         predicted_class=prediction.predicted_class,
         confidence=prediction.confidence,
         all_probabilities=_parse_probabilities(prediction.all_probabilities),
-        explanation="Model attention is heavily concentrated in the lower right lung field, consistent with focal airspace consolidation." if "Pneumonia" in prediction.predicted_class else "Model attention is uniformly distributed across clear pulmonary parenchyma.",
+        explanation=_build_explanation(prediction.predicted_class, prediction.predicted_class.lower() != "normal"),
         is_flagged=prediction.is_flagged or False,
         anonymized_patient_id=scan.anonymized_patient_id,
         modality=scan.modality,
         body_part=scan.body_part,
-        original_image_path=original_path if original_path.exists() else None,
-        gradcam_image_path=gradcam_path if gradcam_path.exists() else None,
+        original_image_bytes=original_bytes,
+        gradcam_image_bytes=gradcam_bytes,
     )
 
     return Response(
@@ -556,14 +639,21 @@ async def get_condition_heatmap(
     prediction = result.scalar_one_or_none()
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
-    if current_user.role == UserRole.STAFF and prediction.scan.uploaded_by != current_user.id:
+
+    # IDOR guard: heatmaps are medical images — owner/creator only.
+    if not _can_access_prediction(current_user, prediction):
         raise HTTPException(status_code=404, detail="Prediction not found")
 
-    gradcam_file = f"gradcam_{prediction.scan.file_hash}.png"
-    gradcam_path = Path(settings.gradcam_dir) / gradcam_file
-    if not gradcam_path.exists():
+    gradcam_bytes = _load_derived_image_bytes(
+        prediction.scan, f"gradcam_{prediction.scan.file_hash}.png"
+    )
+    if gradcam_bytes is None:
         raise HTTPException(status_code=404, detail="Condition heatmap image not found")
-    return FileResponse(path=gradcam_path, media_type="image/png")
+    return Response(
+        content=gradcam_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 async def _scan_for_image(db: AsyncSession, filename: str) -> Optional[Scan]:
@@ -592,11 +682,13 @@ async def get_prediction_image(
 
     # Object-level authorization: the filename embeds the owning scan's file
     # hash, so resolve it back to a Scan and enforce the same ownership rule
-    # as the scan endpoints (staff see their own uploads only).
+    # as the other resource endpoints — staff see their own uploads only;
+    # doctor/radiologist may fetch images for scans they uploaded or
+    # predicted (a peer's heatmap is not fetchable by guessing the hash).
     scan = await _scan_for_image(db, filename)
     if scan is None:
         raise HTTPException(status_code=404, detail="Image not found")
-    if current_user.role == UserRole.STAFF and scan.uploaded_by != current_user.id:
+    if not await _can_access_scan_image(current_user, scan, db):
         raise HTTPException(status_code=404, detail="Image not found")
 
     file_path = os.path.join(GRADCAM_DIR, filename)

@@ -74,7 +74,7 @@ function MetricCard({ label, value, description, color, threshold = 0.85 }: Metr
       }}
     >
       <CardContent sx={{ p: 2.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>
             {label}
           </Typography>
@@ -177,7 +177,7 @@ export function ModelPerformancePage() {
     <AppShell>
       <Box sx={{ maxWidth: 1100, mx: 'auto', px: { xs: 2, md: 3 }, py: 4 }}>
         {/* Header */}
-        <Stack direction="row" alignItems="center" gap={2} mb={1}>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 2, mb: 1 }}>
           <Box sx={{
             p: 1.5, borderRadius: 2.5,
             background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.2)}, ${alpha(theme.palette.secondary.main, 0.2)})`,
@@ -203,31 +203,31 @@ export function ModelPerformancePage() {
         <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 2, mb: 2, display: 'block' }}>
           📊 Clinical Summary Metrics
         </Typography>
-        <Grid container spacing={2} mb={4}>
+        <Grid container spacing={2} sx={{ mb: 4 }}>
           {loading ? (
             Array.from({ length: 6 }).map((_, i) => (
-              <Grid item xs={12} sm={6} md={4} key={i}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={i}>
                 <Skeleton variant="rounded" height={110} sx={{ borderRadius: 3 }} />
               </Grid>
             ))
           ) : metrics ? (
             <>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="Accuracy" value={metrics.metrics.accuracy} description="Percentage of all samples correctly classified." />
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="ROC AUC" value={metrics.metrics.auc} description="Area under the ROC curve — a threshold-independent measure of discrimination." color={theme.palette.info.main} />
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="Sensitivity (Recall)" value={metrics.metrics.sensitivity} description="True Positive Rate — fraction of actual Pneumonia cases correctly detected. Critical for clinical safety." />
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="Specificity" value={metrics.metrics.specificity} description="True Negative Rate — fraction of Normal cases correctly classified as Normal." />
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="Precision" value={metrics.metrics.precision} description="Fraction of Pneumonia predictions that were actually Pneumonia." />
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                 <MetricCard label="F1 Score" value={metrics.metrics.f1} description="Harmonic mean of Precision and Sensitivity — balanced measure." color={theme.palette.warning.main} />
               </Grid>
             </>
@@ -261,12 +261,12 @@ export function ModelPerformancePage() {
         <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 2, mb: 2, display: 'block' }}>
           📈 Visual Analysis Charts
         </Typography>
-        <Grid container spacing={3} mb={4}>
+        <Grid container spacing={3} sx={{ mb: 4 }}>
           {[
             { name: 'confusion_matrix.png', label: 'Confusion Matrix Heatmap' },
             { name: 'metrics_chart.png', label: 'Clinical Metrics Comparison' },
           ].map(({ name, label }) => (
-            <Grid item xs={12} md={6} key={name}>
+            <Grid size={{ xs: 12, md: 6 }} key={name}>
               <Card sx={{
                 borderRadius: 3,
                 background: alpha(theme.palette.background.paper, 0.5),
@@ -322,7 +322,7 @@ export function ModelPerformancePage() {
                   body: 'Before deployment in any clinical environment, this model requires prospective clinical validation studies, bias audits across subpopulations, and review by an institutional ethics board.'
                 },
               ].map(({ icon, title, body }) => (
-                <Stack key={title} direction="row" gap={2} alignItems="flex-start">
+                <Stack key={title} direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
                   <Box sx={{ mt: 0.2, flexShrink: 0 }}>{icon}</Box>
                   <Box>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.3 }}>{title}</Typography>
@@ -336,7 +336,7 @@ export function ModelPerformancePage() {
 
         {/* Metadata chips */}
         {metrics && (
-          <Stack direction="row" flexWrap="wrap" gap={1} mt={2}>
+          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mt: 2 }}>
             <Chip size="small" label={`Engine: ${metrics.engine}`} variant="outlined" />
             <Chip size="small" label={`Test set: ${metrics.num_samples} scans`} variant="outlined" />
             <Chip size="small" label={`Classes: ${metrics.class_names.join(' · ')}`} variant="outlined" />

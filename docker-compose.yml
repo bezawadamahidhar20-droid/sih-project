@@ -49,10 +49,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Dev convenience: reach /docs directly on the host. Remove this port
-    # mapping in production and reach the API only through the nginx proxy.
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    # No host port mapping: the API is reachable ONLY through the nginx
+    # proxy on the frontend container (Internet -> HTTPS proxy -> frontend
+    # -> backend). Exposing /docs or the raw API on a host port would bypass
+    # the proxy and widen the attack surface for no benefit.
+    expose:
+      - "8000"
     environment:
       APP_NAME: MediScan AI
       DEBUG: "false"
@@ -75,6 +77,11 @@ services:
       # Behind nginx: trust X-Forwarded-For for login-lockout / rate-limit keys.
       TRUST_PROXY_HEADERS: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
+      # A trained model is REQUIRED in production: with the file missing and
+      # heuristic fallback disabled, prediction requests fail loudly (HTTP
+      # 500) instead of serving guessed diagnoses. Only flip this for an
+      # explicit dev/demo environment.
+      ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-false}
       LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
       HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}

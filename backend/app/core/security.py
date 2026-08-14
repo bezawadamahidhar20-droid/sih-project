@@ -52,10 +52,26 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
 
 
 def create_refresh_token(data: Dict[str, Any]) -> str:
+    """Create a refresh token; returns only the encoded JWT.
+
+    Prefer :func:`create_refresh_token_with_jti` when the caller needs the
+    token's ``jti`` (e.g. to persist a DB-backed refresh session).
+    """
+    token, _ = create_refresh_token_with_jti(data)
+    return token
+
+
+def create_refresh_token_with_jti(data: Dict[str, Any]) -> tuple[str, str]:
+    """Create a refresh token and return ``(token, jti)`` so callers can
+    record the one-time-use ``jti`` in durable storage (``RefreshSession``)."""
     to_encode = data.copy()
     expire = utcnow_aware() + timedelta(days=settings.jwt_refresh_token_expire_days)
-    to_encode.update({"exp": expire, "type": "refresh", "jti": uuid.uuid4().hex})
-    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    jti = uuid.uuid4().hex
+    to_encode.update({"exp": expire, "type": "refresh", "jti": jti})
+    return (
+        jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm),
+        jti,
+    )
 
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:

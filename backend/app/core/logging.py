@@ -107,14 +107,14 @@ class AuditLogger:
         user_id: str,
         user_role: str,
         file_hash: str,
-        filename: str,
+        file_extension: str,
         file_size: int,
         mime_type: str
     ) -> None:
-        # NOTE: the extra key is ``file_name``, NOT ``filename`` — ``filename``
-        # is a reserved LogRecord attribute and passing it in ``extra`` makes
-        # Python's logging raise KeyError (strict since 3.14), which would
-        # break every upload endpoint call.
+        # Only the sanitized file EXTENSION is logged, never the client-supplied
+        # filename: a filename like ``John_Doe_chest_xray.png`` can embed PHI,
+        # and audit logs must stay PHI-free (DICOM patient identifiers are
+        # also stripped upstream).
         self.logger.info(
             "file_uploaded",
             extra={
@@ -122,7 +122,7 @@ class AuditLogger:
                 "user_id": user_id,
                 "user_role": user_role,
                 "file_hash": file_hash,
-                "file_name": filename,
+                "file_extension": file_extension,
                 "file_size": file_size,
                 "mime_type": mime_type,
             }

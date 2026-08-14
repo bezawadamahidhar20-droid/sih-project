@@ -70,6 +70,27 @@ class Scan(Base):
     )
 
 
+class RefreshSession(Base):
+    """Persistent record of an issued (not yet consumed) refresh token.
+
+    Unlike the legacy in-memory consumed-jti set, this survives process
+    restarts, so a replayed refresh token stays rejected across a redeploy
+    and revocation (logout / password change) is durable. Every refresh
+    token minted by the API gets a row here; the in-memory set in
+    ``auth.py`` is kept only as a backstop for tokens minted before this
+    table existed.
+    """
+
+    __tablename__ = "refresh_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    jti = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
 class Prediction(Base):
     __tablename__ = "predictions"
 
