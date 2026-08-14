@@ -35,9 +35,14 @@ class TestAuth:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "access_token" in data
-        assert "refresh_token" in data
+        # Security contract: the JSON body contains NO JWT material — the
+        # session lives in the HttpOnly cookies (see TestNoTokenExposureInJson
+        # in test_cookie_auth.py).
+        assert "access_token" not in data
+        assert "refresh_token" not in data
         assert data["token_type"] == "bearer"
+        assert client.cookies.get("access_token")
+        assert client.cookies.get("refresh_token")
 
     async def test_login_failure(self, client: AsyncClient):
         response = await client.post(
@@ -63,7 +68,10 @@ class TestAuth:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "access_token" in data
+        # No JWT in the JSON body; rotated tokens go in the HttpOnly cookies.
+        assert "access_token" not in data
+        assert "refresh_token" not in data
+        assert client.cookies.get("access_token")
 
     async def test_staff_cannot_self_promote(self, client: AsyncClient, staff_headers):
         # Privilege-escalation regression: role/is_active are not part of the
@@ -152,10 +160,11 @@ class TestRefreshRotation:
             headers=csrf_headers(client),
         )
         assert r1.status_code == 200
-        # The freshly issued refresh token rotates forward.
+        # The freshly issued refresh token rotates forward — it arrives in the
+        # HttpOnly cookie, so read the rotated value from the client jar.
         r2 = await client.post(
             "/api/v1/auth/refresh",
-            json={"refresh_token": r1.json()["refresh_token"]},
+            json={"refresh_token": client.cookies.get("refresh_token")},
             headers=csrf_headers(client),
         )
         assert r2.status_code == 200

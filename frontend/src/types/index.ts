@@ -11,9 +11,11 @@ export interface User {
   last_login: string | null;
 }
 
-export interface Token {
-  access_token: string;
-  refresh_token: string;
+export interface AuthSuccess {
+  // Login/refresh bodies carry NO JWT material by design: the session lives
+  // in HttpOnly cookies that JavaScript cannot read. Only a confirmation
+  // message and the token scheme are echoed.
+  message: string;
   token_type: string;
 }
 

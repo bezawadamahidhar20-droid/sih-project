@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import get_current_active_user, require_roles
 from app.api.schemas import (
     UserCreate, UserResponse, UserUpdate, UserSelfUpdate, ChangePasswordRequest,
-    Token, LoginRequest, RefreshTokenRequest, LogoutRequest,
+    AuthSuccess, LoginRequest, RefreshTokenRequest, LogoutRequest,
 )
 from app.core.config import get_settings
 from app.core.netutil import client_ip
@@ -208,7 +208,7 @@ async def register(
     return user
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=AuthSuccess)
 async def login(
     credentials: LoginRequest,
     request: Request,
@@ -282,14 +282,13 @@ async def login(
 
     audit_logger.log_auth("login", user_id=str(user.id), username=user.username, success=True)
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    # The session lives in the HttpOnly cookies just set. The JSON body
+    # carries NO JWT: browser JS can read the body but not the HttpOnly
+    # cookies, so echoing tokens here would defeat the point of HttpOnly.
+    return {"message": "Authenticated"}
 
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=AuthSuccess)
 async def refresh_token(
     body: RefreshTokenRequest,
     request: Request,
@@ -322,27 +321,48 @@ async def refresh_token(
     jti = payload.get("jti")
     replay = False
     if jti:
-        row_result = await db.execute(select(RefreshSession).where(RefreshSession.jti == jti))
-        row = row_result.scalar_one_or_none()
-        if row is not None:
-            now = utcnow()
-            if row.revoked_at is not None:
+        # ATOMIC single-use consume (DB-backed tokens). One UPDATE flips
+        # revoked_at from NULL; ``rowcount == 1`` means THIS request won the
+        # rotation. Because the flip is a single conditional UPDATE, two
+        # concurrent refreshes presenting the same token can never both pass
+        # (the old SELECT-then-update had a TOCTOU window that let concurrent
+        # requests each mint a replacement pair — observed live under
+        # PostgreSQL with 20 parallel refreshes).
+        now = utcnow()
+        consumed = await db.execute(
+            update(RefreshSession)
+            .where(
+                RefreshSession.jti == jti,
+                RefreshSession.revoked_at.is_(None),
+                RefreshSession.expires_at >= now,
+            )
+            .values(revoked_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if consumed.rowcount != 1:
+            # UPDATE matched nothing: the token is already revoked (replay),
+            # expired, or has no DB row (legacy token). Distinguish.
+            row_result = await db.execute(
+                select(RefreshSession).where(RefreshSession.jti == jti)
+            )
+            row = row_result.scalar_one_or_none()
+            if row is None:
+                # No DB row: legacy token — use the in-memory consumed set.
+                if jti in _CONSUMED_REFRESH_JTIS:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Refresh token already used"
+                    )
+                _consume_refresh_jti(payload)
+            elif row.revoked_at is not None:
                 replay = True
-            elif row.expires_at < now:
+            else:
+                # Row exists and is not revoked, so the UPDATE only failed
+                # because the session has expired.
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Refresh token expired"
                 )
-            else:
-                row.revoked_at = now  # rotate: this token is now spent
-        else:
-            # No DB row: legacy token — use the in-memory consumed set.
-            if jti in _CONSUMED_REFRESH_JTIS:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Refresh token already used"
-                )
-            _consume_refresh_jti(payload)
 
     try:
         user_id = int(payload.get("sub") or "")
@@ -399,11 +419,9 @@ async def refresh_token(
         "refresh", user_id=str(user.id), username=user.username, success=True,
     )
 
-    return {
-        "access_token": access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer"
-    }
+    # Same contract as login: rotated tokens travel ONLY in the HttpOnly
+    # cookies; the JSON body contains no JWT material.
+    return {"message": "Token refreshed"}
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

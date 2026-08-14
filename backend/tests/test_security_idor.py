@@ -37,12 +37,19 @@ def make_png_bytes(size: int = 256) -> bytes:
 
 
 async def _login(client: AsyncClient, username: str, password: str) -> dict:
+    """Login and return Bearer headers.
+
+    The login JSON body deliberately contains no JWT (security contract), so
+    the access token is read from the HttpOnly cookie the client jar received
+    — exactly how a programmatic HTTP client consumes this API.
+    """
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": username, "password": password},
     )
     assert resp.status_code == 200, resp.text
-    token = resp.json()["access_token"]
+    assert "access_token" not in resp.json()
+    token = client.cookies.get("access_token")
     return {"Authorization": f"Bearer {token}"}
 
 

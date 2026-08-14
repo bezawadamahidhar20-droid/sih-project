@@ -4,7 +4,7 @@ import axios, {
   InternalAxiosRequestConfig,
 } from 'axios';
 import {
-  Token,
+  AuthSuccess,
   LoginRequest,
   User,
   Scan,
@@ -176,12 +176,12 @@ class ApiService {
     return demoMode || localStorage.getItem('demo_mode') === '1';
   }
 
-  async login(credentials: LoginRequest): Promise<Token> {
+  async login(credentials: LoginRequest): Promise<AuthSuccess> {
     try {
       // The backend sets HttpOnly access/refresh cookies + the csrf_token
-      // cookie on success. The JSON body tokens are intentionally ignored —
-      // nothing is ever written to localStorage.
-      const response = await this.client.post<Token>('/auth/login', credentials);
+      // cookie on success and returns NO tokens in the JSON body — the SPA
+      // reads nothing token-like and writes nothing to localStorage.
+      const response = await this.client.post<AuthSuccess>('/auth/login', credentials);
       demoMode = false;
       localStorage.removeItem('demo_mode');
       return response.data;
@@ -206,7 +206,7 @@ class ApiService {
       demoMode = true;
       demoUser = entry.user;
       localStorage.setItem('demo_mode', '1');
-      return { access_token: '', refresh_token: '', token_type: 'bearer' };
+      return { message: 'Authenticated (demo)', token_type: 'bearer' };
     }
   }
 

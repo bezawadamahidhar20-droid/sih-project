@@ -15,12 +15,22 @@ frontend/dist/
 # Runtime data (never commit scans, encrypted files, or DBs)
 backend/uploads/
 backend/logs/
+backend/uploads_e2e/
+backend/logs_e2e/
 # Safety net: backend/.env uses relative paths, so if the backend is ever
 # started from the repo root (not backend/), uploads/ and logs/ land here.
 /uploads/
 /logs/
 *.db
 *.sqlite3
+
+# Runtime verification harness state (verification/ scripts are tracked;
+# their generated secrets/state/uploads are not)
+verification/.prod_secrets
+verification/.backend_pid*
+verification/.e2e_*
+verification/.pre_restart_refresh
+verification/.ratetest.png
 
 # Trained CNN checkpoint — committed intentionally. The API requires it
 # (fails loudly without the model), so it ships with the repo.

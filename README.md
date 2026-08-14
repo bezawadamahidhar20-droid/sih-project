@@ -99,14 +99,27 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
 - **HttpOnly cookie sessions (no tokens in JavaScript)**: the browser SPA
   authenticates with `HttpOnly` + `SameSite` + `Secure` cookies set by the
   backend — access tokens and refresh tokens are **never stored in
-  `localStorage`** and JavaScript cannot read them. CSRF is mitigated with
-  a SameSite policy + Origin verification + a double-submit `csrf_token`
-  cookie echoed in the `X-CSRF-Token` header on every state-changing
-  request. Programmatic clients can still use `Authorization: Bearer`.
+  `localStorage`** and JavaScript cannot read them. The login/refresh JSON
+  response bodies deliberately contain **no JWT material** (only a
+  confirmation message), so a token can never leak through a response body
+  that page JavaScript can read; the session lives entirely in the
+  Set-Cookie headers. CSRF is mitigated with a SameSite policy + Origin
+  verification + a double-submit `csrf_token` cookie echoed in the
+  `X-CSRF-Token` header on every state-changing request. Programmatic
+  clients read the tokens from the Set-Cookie headers (HTTP libraries
+  expose them regardless of HttpOnly) and can also use
+  `Authorization: Bearer`.
 - **Shared security state**: rate limiting and login lockout run on a
   sliding-window store that is in-process by default (single worker) and
   Redis-backed with `USE_REDIS=true` when scaling to multiple workers
   (`WORKERS>1` is refused at startup unless Redis is enabled).
+- **Self-hosted fonts, strict CSP**: all UI fonts (Inter, Space Grotesk,
+  Figtree, Noto Sans, IBM Plex Mono) are bundled as woff2 under
+  `frontend/public/fonts/` and served same-origin (`@font-face` in
+  `frontend/src/fonts.css`). There is no dependency on Google Fonts, so the
+  production CSP (`default-src 'self'; style-src 'self' 'unsafe-inline'`)
+  needs no third-party origins and the browser console is free of font
+  errors.
 - **Clinical safety UX**: predictions below the 70% confidence threshold are
   flagged, high-risk findings are emphasized, and doctors can flag results for
   review. Model selection during training prioritizes **sensitivity** (minimize
@@ -226,12 +239,15 @@ All passwords are `DemoPass123!`:
 
 ## API overview
 
-All routes are prefixed with `/api/v1`. JWT access tokens are returned by
-`POST /auth/login`.
+All routes are prefixed with `/api/v1`. The browser session is carried by
+HttpOnly cookies set on login (`access_token`, `refresh_token`, `csrf_token`)
+and **the login/refresh JSON bodies contain no JWT** — the session is in the
+Set-Cookie headers only. Programmatic clients read the tokens from the
+Set-Cookie headers and can also send `Authorization: Bearer`.
 
 | Endpoint | Auth | Description |
 | --- | --- | --- |
-| `POST /auth/login` | public | JWT + refresh token |
+| `POST /auth/login` | public | sets HttpOnly session cookies; JSON body has **no JWT** |
 | `POST /auth/register` | doctor/radiologist | create user |
 | `PATCH /auth/me` | any role | update own `email` / `full_name` only |
 | `POST /auth/change-password` | any role | change own password (current password required) |
@@ -406,10 +422,10 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 122 tests (validation, cleanup, security, RBAC, ML safety, rate limits,
+# Backend — 129 tests (validation, cleanup, security, RBAC, ML safety, rate limits,
 # image-quality gate, token rotation/revocation, IDOR cross-doctor attacks, logout,
 # refresh replay/family revocation, HttpOnly-cookie auth, CSRF, DICOM PHI,
-# real-CNN inference probe)
+# no-JWT-in-JSON contract, real-CNN inference probe)
 cd backend
 .venv/Scripts/python -m pytest -q
 

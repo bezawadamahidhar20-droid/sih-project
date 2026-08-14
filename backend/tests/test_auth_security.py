@@ -11,12 +11,23 @@ from httpx import AsyncClient
 
 
 async def _login(client: AsyncClient, username: str = "testuser", password: str = "testpass123") -> dict:
+    """Login and return the session tokens.
+
+    The login JSON body deliberately contains no JWT (security contract), so
+    programmatic consumers read the tokens from the Set-Cookie headers —
+    exactly how a non-browser HTTP client consumes this API.
+    """
     resp = await client.post(
         "/api/v1/auth/login",
         json={"username": username, "password": password},
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()
+    assert "access_token" not in resp.json()
+    assert "refresh_token" not in resp.json()
+    return {
+        "access_token": client.cookies.get("access_token"),
+        "refresh_token": client.cookies.get("refresh_token"),
+    }
 
 
 def _csrf(client: AsyncClient) -> dict:
@@ -67,6 +78,78 @@ class TestLogout:
         assert resp.status_code == 204
 
 
+class TestAtomicRefreshConsume:
+    """The refresh-token consume must be a single conditional UPDATE.
+
+    Regression for a real TOCTOU observed live under PostgreSQL: with the old
+    SELECT-then-mark code, 20 concurrent refreshes presenting the SAME token
+    produced 4 successful rotations (one token minted multiple replacement
+    pairs). The consume below is atomic — only one transaction can flip
+    revoked_at from NULL — so single-use holds under concurrency.
+    """
+
+    async def _consume(self, db_session, jti: str, now) -> int:
+        from sqlalchemy import update
+
+        from app.db.models import RefreshSession
+
+        result = await db_session.execute(
+            update(RefreshSession)
+            .where(
+                RefreshSession.jti == jti,
+                RefreshSession.revoked_at.is_(None),
+                RefreshSession.expires_at >= now,
+            )
+            .values(revoked_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount
+
+    async def test_atomic_consume_is_single_use(self, test_user, db_session):
+        from datetime import timedelta
+
+        from app.core.security import create_refresh_token_with_jti
+        from app.core.timeutil import utcnow
+        from app.db.models import RefreshSession
+
+        _, jti = create_refresh_token_with_jti(
+            data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
+        )
+        db_session.add(
+            RefreshSession(user_id=test_user.id, jti=jti, expires_at=utcnow() + timedelta(days=7))
+        )
+        await db_session.commit()
+
+        now = utcnow()
+        first = await self._consume(db_session, jti, now)
+        assert first == 1, "the first consume must win the rotation"
+
+        second = await self._consume(db_session, jti, now)
+        assert second == 0, "a second consume of the same token must lose (single-use)"
+
+    async def test_expired_session_cannot_be_consumed(self, test_user, db_session):
+        from datetime import timedelta
+
+        from app.core.security import create_refresh_token_with_jti
+        from app.core.timeutil import utcnow
+        from app.db.models import RefreshSession
+
+        _, jti = create_refresh_token_with_jti(
+            data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
+        )
+        db_session.add(
+            RefreshSession(
+                user_id=test_user.id,
+                jti=jti,
+                expires_at=utcnow() - timedelta(minutes=5),
+            )
+        )
+        await db_session.commit()
+
+        consumed = await self._consume(db_session, jti, utcnow())
+        assert consumed == 0, "an expired session must never be consumed"
+
+
 class TestExpiredRefreshToken:
     async def test_expired_db_session_rejected(self, client, test_user, db_session):
         """A refresh token whose RefreshSession row has expired must be
@@ -115,7 +198,7 @@ class TestDbBackedRotation:
         assert r1.status_code == 200
         r2 = await client.post(
             "/api/v1/auth/refresh",
-            json={"refresh_token": r1.json()["refresh_token"]},
+            json={"refresh_token": client.cookies.get("refresh_token")},
             headers=_csrf(client),
         )
         assert r2.status_code == 200
@@ -156,7 +239,7 @@ class TestDbBackedRotation:
         # Even the freshly rotated refresh token cannot be used anymore.
         r2 = await client.post(
             "/api/v1/auth/refresh",
-            json={"refresh_token": r1.json()["refresh_token"]},
+            json={"refresh_token": client.cookies.get("refresh_token")},
             headers=_csrf(client),
         )
         assert r2.status_code == 401

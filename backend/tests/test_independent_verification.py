@@ -31,7 +31,9 @@ class TestTokenTypeMisuse:
             json={"username": "testuser", "password": "testpass123"},
         )
         assert tokens.status_code == 200
-        access = tokens.json()["access_token"]
+        # No JWT in the JSON body (security contract): read from the cookies.
+        assert "access_token" not in tokens.json()
+        access = client.cookies.get("access_token")
 
         # The login set auth cookies in the jar; the refresh call is
         # cookie-authenticated, so it needs the double-submit CSRF header to
@@ -49,7 +51,8 @@ class TestTokenTypeMisuse:
             json={"username": "testuser", "password": "testpass123"},
         )
         assert tokens.status_code == 200
-        refresh = tokens.json()["refresh_token"]
+        assert "refresh_token" not in tokens.json()
+        refresh = client.cookies.get("refresh_token")
 
         resp = await client.get(
             "/api/v1/auth/me", headers={"Authorization": f"Bearer {refresh}"}

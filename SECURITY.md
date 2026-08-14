@@ -20,7 +20,7 @@ compliance — none of that has been achieved or certified.
 | Replay / theft | Presenting an already-consumed refresh token returns 401 **and revokes the entire session family**: all the user's refresh sessions are revoked and `token_version` is bumped, which also kills every outstanding access token. |
 | Logout | `POST /auth/logout` revokes the presented refresh token server-side (idempotent, public — the only effect of a forged call is burning a token the caller already possessed). Access tokens expire naturally (default 30 min). |
 | Revocation | Password change / role change / deactivation bumps `token_version`; access and refresh tokens embed it, so all previously issued tokens die instantly. |
-| Token storage (client) | **HttpOnly cookies** — the browser SPA authenticates via `access_token` (HttpOnly, SameSite=Lax, Path=/) and `refresh_token` (HttpOnly, SameSite=Strict, Path=/api/v1/auth) cookies plus a JS-readable `csrf_token` cookie. Tokens are never stored in `localStorage` and JavaScript cannot read them. Programmatic clients may still use `Authorization: Bearer`. |
+| Token storage (client) | **HttpOnly cookies** — the browser SPA authenticates via `access_token` (HttpOnly, SameSite=Lax, Path=/) and `refresh_token` (HttpOnly, SameSite=Strict, Path=/api/v1/auth) cookies plus a JS-readable `csrf_token` cookie. Tokens are never stored in `localStorage` and JavaScript cannot read them. **The login/refresh JSON bodies contain no JWT material** (only a confirmation message) — browser JS can read the response body but not the HttpOnly cookies, so echoing tokens there would defeat HttpOnly; the session lives exclusively in the Set-Cookie headers. Programmatic clients read the tokens from the Set-Cookie headers and may also use `Authorization: Bearer`. |
 
 ## 2. Authorization
 
@@ -110,7 +110,7 @@ opt-in**:
 | --- | --- | --- | --- |
 | Unauthenticated attacker | Guess/stuff API endpoints | JWT access tokens required on all data routes; 401 otherwise | — |
 | Brute-force login | Password guessing | Rate limit by proxy-aware IP + username; bcrypt; dummy-hash timing equalization | In-process store; replace with Redis/nginx `limit_req` at scale |
-| Stolen access token | XSS reading `localStorage`, network sniffing | 30-min expiry; `token_version` revocation; HTTPS recommended | Tokens in `localStorage` are XSS-readable — move to HttpOnly Secure SameSite cookies (§8) |
+| Stolen access token | XSS reading `localStorage`, network sniffing | 30-min expiry; `token_version` revocation; HTTPS recommended | Tokens are HttpOnly Secure SameSite cookies (not JS-readable) and never appear in JSON response bodies; residual risk is an XSS that runs same-origin fetch through the cookie session |
 | Stolen refresh token | Replay after rotation | DB-backed rotation; replay triggers family revocation + `token_version` bump | — |
 | Logout bypass | Token used after logout | Server-side revocation of refresh token; access tokens short-lived | Access token lives until expiry (≤30 min) — inherent to stateless JWTs |
 | Malicious authenticated doctor | IDOR on another clinician's PDF/heatmap/flag/delete | Owner-scoped queries + safe 404; regression tests | Cross-doctor *review* of PDFs/heatmaps requires explicit sharing/assignment — not yet implemented |
@@ -153,14 +153,42 @@ loading (`weights_only=True`), and the sliding-window store contract.
 Frontend demo gating is covered by the production typecheck/build (the
 frontend has no unit-test runner).
 
+**Live runtime verification (August 2026, this machine):** beyond the unit
+suite, the production-mode stack was exercised end-to-end against a real
+PostgreSQL 16 (`pg_concurrency.py`: concurrent single-use refresh — 10 parallel
+refreshes of the same token yield exactly one 200; unique file-hash constraint
+→ 409; `refresh_sessions` rows persisted), a live Redis 7 (`smoke_redis.py`
+23/23: lockout, CSRF, rotation/replay family-revoke, per-user predict budget;
+`smoke_redis_persist.py` 5/5: lockout + refresh sessions survive a backend
+restart), and WORKERS=2 with `USE_REDIS=true` (`smoke_multiprocess.py` 14/14:
+rate limit 429 lands on exactly the 6th call across two worker processes,
+shared lockout, cross-worker rotation/replay, CSRF). A full browser smoke test
+drove Chrome over nginx TLS (`browser_e2e.js` 18/18: login, HttpOnly proof
+via `document.cookie`, upload, real Grad-CAM render, PDF export, logout +
+refresh denial). See `verification/`.
+
+## 7b. CSP / third-party content
+
+- **Fonts are self-hosted** (`frontend/public/fonts/*.woff2`, `@font-face` in
+  `frontend/src/fonts.css`). The production CSP is `default-src 'self'` with
+  `style-src 'self' 'unsafe-inline'` and `img-src 'self' data: blob:` — no
+  external origins are required, so the strict policy does not break fonts and
+  the browser console shows no font/CSP errors (verified in the browser E2E
+  after the self-hosting change).
+- The nginx template (`deploy/nginx-production.conf.example`) ships the same
+  policy plus HSTS, frame-ancestors, nosniff and Referrer-Policy.
+
 ## 8. Known limitations
 
 1. **In-process security state by default** — rate limiting and login lockout
    use the in-memory store unless `USE_REDIS=true`. This is correct for the
-   shipped single-worker deployment (`WORKERS>1` is refused without Redis),
-   and the Redis store is implemented behind the same interface — but the
-   Redis path has not been integration-tested against a live Redis server in
-   this environment.
+   shipped single-worker deployment (`WORKERS>1` is refused without Redis).
+   The Redis path is now live-verified (see §7): shared lockout, per-user
+   budgets, and refresh sessions survive backend restarts and hold under
+   WORKERS=2. One caveat remains: Redis persistence (RDB/AOF) is not enabled
+   in the shipped compose service, so rate-limit/lockout counters disappear
+   on a full Redis restart — that is acceptable because DB-backed refresh
+   sessions (the security-critical state) survive independently.
 2. **Cross-doctor review workflow** — doctors/radiologists can *see* the full
    list of predictions, but PDF/heatmap/flag are owner-scoped. A formal
    "share/assign case to radiologist" feature is not implemented (deliberately
@@ -178,6 +206,8 @@ frontend has no unit-test runner).
    Demo mode is opt-in and visibly labeled; the live API only ever reports the
    real model's classes.
 6. **Single-value encryption key** — no key-rotation mechanism yet.
-7. **Docker not machine-validated here** — `docker compose config` and a live
-   container run were not possible in this environment; compose/Dockerfiles
-   were statically reviewed.
+7. **Docker not machine-validated here** — Docker is not installed on this
+   machine, so `docker compose build/up` and a containerized run were not
+   possible; compose/Dockerfiles were statically reviewed, and the same
+   services (backend + PostgreSQL + Redis + nginx TLS) were verified running
+   natively instead.

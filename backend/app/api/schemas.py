@@ -82,9 +82,18 @@ class UserResponse(_UtcOffsetSerialization, BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class Token(BaseModel):
-    access_token: str
-    refresh_token: str
+class AuthSuccess(BaseModel):
+    """Login/refresh response body.
+
+    The session is carried entirely by HttpOnly cookies (access_token /
+    refresh_token / csrf_token Set-Cookie headers); the JSON body
+    deliberately contains NO JWT material. A token echo in the body would be
+    unnecessary exposure — browser JavaScript cannot read the HttpOnly
+    cookies, but it CAN read the response body. Programmatic clients obtain
+    the tokens from the Set-Cookie headers, which HTTP libraries expose
+    regardless of the HttpOnly attribute.
+    """
+    message: str
     token_type: str = "bearer"
 
 

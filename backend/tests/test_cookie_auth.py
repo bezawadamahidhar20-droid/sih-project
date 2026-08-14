@@ -114,6 +114,114 @@ class TestCookieRefreshFlow:
         assert replay.status_code == 401
 
 
+class TestNoTokenExposureInJson:
+    """Security contract: login/refresh JSON responses contain NO JWT
+    material. Browser JS can read the response body but NOT the HttpOnly
+    cookies, so echoing tokens in the body would defeat HttpOnly. The
+    session is carried exclusively by the Set-Cookie headers."""
+
+    async def test_login_json_contains_no_jwt(self, client, test_user):
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "access_token" not in body
+        assert "refresh_token" not in body
+        assert "Authorization" not in body
+        # The session is present, in the HttpOnly cookies.
+        assert client.cookies.get("access_token")
+        assert client.cookies.get("refresh_token")
+
+    async def test_refresh_json_contains_no_jwt(self, client, test_user):
+        await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        old_refresh = client.cookies.get("refresh_token")
+        resp = await client.post(
+            "/api/v1/auth/refresh",
+            json={},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "access_token" not in body
+        assert "refresh_token" not in body
+        # Rotation still happened — via the HttpOnly cookie.
+        assert client.cookies.get("refresh_token") != old_refresh
+
+    async def test_logout_json_contains_no_jwt(self, client, test_user):
+        await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        resp = await client.post(
+            "/api/v1/auth/logout",
+            json={},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert resp.status_code == 204
+        assert resp.content == b""
+
+    async def test_authentication_still_works_via_cookies(self, client, test_user):
+        """After the contract change the full cookie flow still works:
+        login -> authenticated request -> refresh -> logout -> refresh denied."""
+        login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        assert login.status_code == 200
+
+        me = await client.get("/api/v1/auth/me")
+        assert me.status_code == 200
+
+        old_refresh = client.cookies.get("refresh_token")
+        refresh = await client.post(
+            "/api/v1/auth/refresh",
+            json={},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert refresh.status_code == 200
+        assert client.cookies.get("refresh_token") != old_refresh
+
+        logout = await client.post(
+            "/api/v1/auth/logout",
+            json={},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert logout.status_code == 204
+
+        after = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": old_refresh},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token") or "x"},
+        )
+        assert after.status_code == 401
+
+    async def test_replay_detection_still_works_after_contract_change(self, client, test_user):
+        await client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "testpass123"},
+        )
+        old_refresh = client.cookies.get("refresh_token")
+        r1 = await client.post(
+            "/api/v1/auth/refresh",
+            json={},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert r1.status_code == 200
+        replay = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": old_refresh},
+            headers={"X-CSRF-Token": client.cookies.get("csrf_token")},
+        )
+        assert replay.status_code == 401
+        # Family revocation: current access cookie is dead too.
+        assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
 class TestCsrf:
     async def _login(self, client):
         resp = await client.post(
