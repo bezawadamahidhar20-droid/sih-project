@@ -19,17 +19,25 @@ http_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(http_bearer),
     db: AsyncSession = Depends(get_db)
 ) -> User:
-    if not credentials:
+    # Token source: Authorization: Bearer header (programmatic clients) OR the
+    # HttpOnly access_token cookie (browser SPA — JavaScript never sees it).
+    token = None
+    if credentials:
+        token = credentials.credentials
+    else:
+        token = request.cookies.get("access_token")
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    token = credentials.credentials
     payload = decode_token(token)
     
     if not payload or payload.get("type") != "access":
@@ -123,9 +131,9 @@ def rate_limit(limiter):
     on an expensive endpoint. Returns 429 when the per-user budget in the
     current window is exhausted.
     """
-    def _checker(
+    async def _checker(
         request: Request,
         current_user: User = Depends(get_current_active_user),
     ) -> None:
-        limiter.check(request, current_user.id)
+        await limiter.check(request, current_user.id)
     return _checker

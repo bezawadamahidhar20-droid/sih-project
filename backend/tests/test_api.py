@@ -3,6 +3,7 @@ from httpx import AsyncClient, ASGITransport
 
 from app.core.security import create_refresh_token
 from app.api.routes.auth import LOGIN_MAX_ATTEMPTS
+from tests.conftest import csrf_headers
 
 # Fixtures (client, test_user, test_staff, auth_headers, staff_headers,
 # db_session, setup_db) are provided by tests/conftest.py.
@@ -118,18 +119,26 @@ class TestAuth:
 
 
 class TestRefreshRotation:
+    # Successful refreshes set the HttpOnly auth cookies in the client's jar,
+    # so the follow-up request is cookie-authenticated and must carry the
+    # double-submit CSRF header (csrf_headers() returns {} when the jar is
+    # empty, so attaching it unconditionally is safe).
     async def test_refresh_token_is_single_use(self, client: AsyncClient, test_user):
         refresh_token = create_refresh_token(
             data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
         )
         first = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+            headers=csrf_headers(client),
         )
         assert first.status_code == 200
 
         # Replaying the same (now consumed) refresh token must be rejected.
         replay = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+            headers=csrf_headers(client),
         )
         assert replay.status_code == 401
 
@@ -138,12 +147,16 @@ class TestRefreshRotation:
             data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
         )
         r1 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+            headers=csrf_headers(client),
         )
         assert r1.status_code == 200
         # The freshly issued refresh token rotates forward.
         r2 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": r1.json()["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": r1.json()["refresh_token"]},
+            headers=csrf_headers(client),
         )
         assert r2.status_code == 200
 

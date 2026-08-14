@@ -47,9 +47,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Restore the cached profile if present. Authentication itself is now
+    // cookie-based (HttpOnly cookies set by the backend) — there are no
+    // tokens in localStorage to check. If the cookies are gone/expired, the
+    // first API call 401s, the client refreshes/clears, and the app routes
+    // back to /login.
     const storedUser = localStorage.getItem('user');
-    const token = localStorage.getItem('access_token');
-    if (storedUser && token) {
+    if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
       } catch {

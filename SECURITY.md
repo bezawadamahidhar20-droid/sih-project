@@ -20,7 +20,7 @@ compliance — none of that has been achieved or certified.
 | Replay / theft | Presenting an already-consumed refresh token returns 401 **and revokes the entire session family**: all the user's refresh sessions are revoked and `token_version` is bumped, which also kills every outstanding access token. |
 | Logout | `POST /auth/logout` revokes the presented refresh token server-side (idempotent, public — the only effect of a forged call is burning a token the caller already possessed). Access tokens expire naturally (default 30 min). |
 | Revocation | Password change / role change / deactivation bumps `token_version`; access and refresh tokens embed it, so all previously issued tokens die instantly. |
-| Token storage (client) | Access + refresh tokens currently live in `localStorage` (XSS-exposed). **Known limitation — see §8.** |
+| Token storage (client) | **HttpOnly cookies** — the browser SPA authenticates via `access_token` (HttpOnly, SameSite=Lax, Path=/) and `refresh_token` (HttpOnly, SameSite=Strict, Path=/api/v1/auth) cookies plus a JS-readable `csrf_token` cookie. Tokens are never stored in `localStorage` and JavaScript cannot read them. Programmatic clients may still use `Authorization: Bearer`. |
 
 ## 2. Authorization
 
@@ -64,8 +64,30 @@ Doctor B` style leaks).
   from the environment. `ENVIRONMENT=production` **refuses placeholder secrets
   at startup**. `docker compose` fails fast (`:?`) when they are unset.
 - **Rate limiting**: per-user sliding windows on upload + prediction (429 with
-  `Retry-After`) and on login. In-process — adequate for the shipped
-  single-worker stack, documented for replacement with Redis on scale-out.
+  `Retry-After`) and on login, backed by a shared sliding-window store.
+  In-process by default (`InMemorySlidingWindowStore`); Redis-shared
+  (`RedisSlidingWindowStore`) when `USE_REDIS=true`. `WORKERS>1` is refused at
+  startup unless Redis is enabled, so the limits can never silently become
+  per-process bypassable.
+
+## 3b. CSRF protection
+
+Authentication is cookie-based, so CSRF is mitigated in three layers:
+
+1. **SameSite** — access cookie `Lax`, refresh cookie `Strict`; cross-site
+   requests never carry the refresh cookie and only top-level navigations
+   carry the access cookie.
+2. **Origin verification** — every state-changing request with an `Origin`
+   header must match a configured frontend origin, otherwise 403 (covers
+   login CSRF too, where no cookie exists yet).
+3. **Double-submit token** — cookie-authenticated state-changing requests
+   must echo the `csrf_token` cookie in the `X-CSRF-Token` header; a
+   cross-site attacker cannot read the cookie (same-origin policy) and
+   cannot forge the header. Requests authenticated with a Bearer header are
+   exempt (an attacker cannot forge that header cross-site — no CSRF surface).
+
+All three layers are covered by regression tests (missing header 403, forged
+header 403, cross-site Origin 403, correct header OK).
 
 ## 4. Demo mode
 
@@ -112,34 +134,41 @@ opt-in**:
 - [ ] Only the frontend port is exposed (`BACKEND_PORT` is not mapped).
 - [ ] Postgres + Redis (if added) are not exposed publicly.
 - [ ] CORS allows only the real frontend origin(s) via `CORS_ORIGINS`.
-- [ ] Move client tokens to HttpOnly SameSite cookies (see §8) before any public deployment.
+- [ ] HttpOnly/Secure/SameSite cookies are active by default (this repo); CSRF layers are tested.
+- [ ] `USE_REDIS=true` + reachable Redis before scaling `WORKERS>1` (enforced at startup).
 - [ ] Key rotation plan for `ENCRYPTION_KEY` (Fernet keys are single-value today).
-- [ ] Security headers: Content-Security-Policy, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, frame-ancestors.
+- [ ] Security headers: Content-Security-Policy, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, frame-ancestors (template: `deploy/nginx-production.conf.example`).
 - [ ] Container image digests pinned; read-only root filesystem where feasible.
 
 ## 7. Testing
 
 The suite covers (among others): the exact cross-doctor IDOR attacks (flag /
 PDF / heatmap / delete / images), logout + refresh replay family revocation,
-demo-mode gating logic, DICOM PHI (StudyID removal, UID replacement,
-multi-frame rejection), upload validation, path traversal, staff isolation,
-image-quality gate, and secure checkpoint loading (`weights_only=True`).
+HttpOnly-cookie auth (attributes, cookie-only requests, cookie refresh
+rotation), CSRF (missing/forged header, cross-site Origin), demo-mode gating
+logic, DICOM PHI (StudyID removal, UID replacement, multi-frame rejection),
+upload validation, path traversal, staff isolation, privilege escalation
+(no admin role, no self-escalation), image-quality gate, secure checkpoint
+loading (`weights_only=True`), and the sliding-window store contract.
 Frontend demo gating is covered by the production typecheck/build (the
 frontend has no unit-test runner).
 
 ## 8. Known limitations
 
-1. **Tokens in `localStorage`** — the biggest remaining item for a public
-   deployment. Moving to HttpOnly Secure SameSite cookies requires the backend
-   to set cookies on login/refresh (with CSRF protection) and the frontend to
-   stop reading tokens from JS; it is deliberately not done halfway in this
-   repository.
-2. **In-process rate limiting / login lockout** — correct for the shipped
-   single-worker stack; must become Redis-backed when scaling horizontally.
-3. **Cross-doctor review workflow** — doctors/radiologists can *see* the full
+1. **In-process security state by default** — rate limiting and login lockout
+   use the in-memory store unless `USE_REDIS=true`. This is correct for the
+   shipped single-worker deployment (`WORKERS>1` is refused without Redis),
+   and the Redis store is implemented behind the same interface — but the
+   Redis path has not been integration-tested against a live Redis server in
+   this environment.
+2. **Cross-doctor review workflow** — doctors/radiologists can *see* the full
    list of predictions, but PDF/heatmap/flag are owner-scoped. A formal
-   "share/assign case to radiologist" feature would be needed for peer review
-   of documents.
+   "share/assign case to radiologist" feature is not implemented (deliberately
+   not broadened to all-access); owner-scoped security is the default.
+3. **Role administration** — the three roles (doctor/radiologist/staff) are
+   managed by doctors/radiologists per the documented policy; there is no
+   separate admin role. Self-role/status changes are blocked and there is no
+   way to escalate to a non-existent admin role.
 4. **Model metrics** — `results/model.evaluation.json` reports hold-out
    performance of the shipped CNN; these are reported training/evaluation
    metrics on the Kaggle Chest X-Ray dataset, not validated real-world
@@ -149,3 +178,6 @@ frontend has no unit-test runner).
    Demo mode is opt-in and visibly labeled; the live API only ever reports the
    real model's classes.
 6. **Single-value encryption key** — no key-rotation mechanism yet.
+7. **Docker not machine-validated here** — `docker compose config` and a live
+   container run were not possible in this environment; compose/Dockerfiles
+   were statically reviewed.

@@ -24,6 +24,8 @@ from httpx import AsyncClient
 
 class TestTokenTypeMisuse:
     async def test_access_token_cannot_refresh(self, client, test_user):
+        from tests.conftest import csrf_headers
+
         tokens = await client.post(
             "/api/v1/auth/login",
             json={"username": "testuser", "password": "testpass123"},
@@ -31,8 +33,13 @@ class TestTokenTypeMisuse:
         assert tokens.status_code == 200
         access = tokens.json()["access_token"]
 
+        # The login set auth cookies in the jar; the refresh call is
+        # cookie-authenticated, so it needs the double-submit CSRF header to
+        # reach the route (which then correctly rejects an access token).
         resp = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": access}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": access},
+            headers=csrf_headers(client),
         )
         assert resp.status_code == 401
 

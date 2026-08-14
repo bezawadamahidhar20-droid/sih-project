@@ -161,6 +161,9 @@ class TestCrossDoctorIDOR:
 
     async def test_unauthenticated_pdf_and_heatmap_401(self, client, db_session, test_user, auth_headers):
         _, _, pred = await self._setup(client, db_session, test_user)
+        # The setup logged Doctor B in on this client, so the jar holds auth
+        # cookies — clear them to truly simulate an anonymous caller.
+        client.cookies.clear()
         pdf = await client.get(f"/api/v1/predictions/{pred['id']}/pdf")
         assert pdf.status_code == 401
         heatmap = await client.get(f"/api/v1/predictions/{pred['id']}/heatmap/Normal")

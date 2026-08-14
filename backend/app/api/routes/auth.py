@@ -1,9 +1,9 @@
-from collections import defaultdict
+import secrets
 from datetime import timedelta
 from time import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +20,7 @@ from app.core.security import (
     create_access_token, create_refresh_token, create_refresh_token_with_jti,
     decode_token
 )
+from app.core.stores import get_security_store
 from app.core.timeutil import utcnow
 from app.db.session import get_db
 from app.db.models import User, UserRole, RefreshSession
@@ -31,11 +32,10 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 # ---------------------------------------------------------------------------
 # Brute-force protection for the login endpoint.
 #
-# A small in-process sliding-window limiter keyed by client IP + username.
-# Acceptable for the single-worker deployment this stack ships with; swap for
-# a shared store (Redis) or nginx ``limit_req`` when scaling horizontally.
+# Sliding-window limiter keyed by client IP + username, backed by the shared
+# security store (in-process for the single-worker stack; Redis when
+# USE_REDIS=true so lockouts hold across workers/instances).
 # ---------------------------------------------------------------------------
-_LOGIN_FAILURES: Dict[str, List[float]] = defaultdict(list)
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 15 * 60  # 15 minutes
 
@@ -52,30 +52,64 @@ _MAX_CONSUMED_JTIS = 10_000
 # does not exist, so account existence cannot be probed by latency.
 _DUMMY_HASH = get_password_hash("timing-equalization-dummy-value")
 
+# Cookie names for the HttpOnly/Secure/SameSite authentication cookies.
+ACCESS_COOKIE = "access_token"
+REFRESH_COOKIE = "refresh_token"
+CSRF_COOKIE = "csrf_token"
+
 
 def _rate_limit_key(request: Request, username: str) -> str:
     # Uses the proxy-aware client IP (nginx X-Forwarded-For) so all requests
     # behind the reverse proxy are NOT treated as one shared client — five
     # failed attempts from one attacker can no longer lock out a real user.
-    return f"{client_ip(request)}:{username.lower()}"
+    return f"login:{client_ip(request)}:{username.lower()}"
 
 
-def _prune_login_failures(now: float) -> None:
-    """Drop keys that have gone quiet so random-username floods cannot grow
-    the store without bound (keys are normally pruned on re-check only)."""
-    for stale in [
-        k for k, v in _LOGIN_FAILURES.items()
-        if not v or now - v[-1] >= LOGIN_WINDOW_SECONDS
-    ]:
-        _LOGIN_FAILURES.pop(stale, None)
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    """Set the HttpOnly authentication cookies.
+
+    * ``access_token`` — HttpOnly, SameSite=Lax, Path=/ (sent with every
+      API request, still not readable by JavaScript).
+    * ``refresh_token`` — HttpOnly, SameSite=Strict, scoped to the auth
+      prefix so it is only ever sent to the auth endpoints; Strict means it
+      is never forwarded cross-site.
+    * ``csrf_token`` — NOT HttpOnly (the SPA must read it back for the
+      double-submit CSRF header); it is a random non-credential, safe to
+      expose to the page it belongs to.
+    """
+    response.set_cookie(
+        key=ACCESS_COOKIE,
+        value=access_token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+        max_age=settings.jwt_access_token_expire_minutes * 60,
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE,
+        value=refresh_token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path="/api/v1/auth",
+        max_age=settings.jwt_refresh_token_expire_days * 86400,
+    )
+    response.set_cookie(
+        key=CSRF_COOKIE,
+        value=secrets.token_urlsafe(32),
+        httponly=False,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
 
 
-def _login_blocked(key: str) -> bool:
-    now = time()
-    recent = [t for t in _LOGIN_FAILURES[key] if now - t < LOGIN_WINDOW_SECONDS]
-    _LOGIN_FAILURES[key] = recent
-    _prune_login_failures(now)
-    return len(recent) >= LOGIN_MAX_ATTEMPTS
+def _clear_auth_cookies(response: Response) -> None:
+    """Expire every auth cookie (logout). Same attributes as set so the
+    browser matches them for deletion."""
+    for name, path in ((ACCESS_COOKIE, "/"), (REFRESH_COOKIE, "/api/v1/auth"), (CSRF_COOKIE, "/")):
+        response.delete_cookie(key=name, path=path, secure=settings.cookie_secure, httponly=(name != CSRF_COOKIE), samesite="lax")
 
 
 def _consume_refresh_jti(payload: Dict[str, Any]) -> None:
@@ -97,14 +131,6 @@ def _consume_refresh_jti(payload: Dict[str, Any]) -> None:
             _CONSUMED_REFRESH_JTIS.pop(key, None)
     exp = payload.get("exp")
     _CONSUMED_REFRESH_JTIS[jti] = float(exp) if isinstance(exp, (int, float)) else now + LOGIN_WINDOW_SECONDS
-
-
-def _register_login_failure(key: str) -> None:
-    _LOGIN_FAILURES[key].append(time())
-
-
-def _clear_login_failures(key: str) -> None:
-    _LOGIN_FAILURES.pop(key, None)
 
 
 async def _persist_refresh_session(db: AsyncSession, user_id: int, jti: str) -> None:
@@ -186,10 +212,12 @@ async def register(
 async def login(
     credentials: LoginRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db)
 ):
+    store = get_security_store()
     key = _rate_limit_key(request, credentials.username)
-    if _login_blocked(key):
+    if await store.is_over_limit(key, LOGIN_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS):
         audit_logger.log_auth("login", username=credentials.username, success=False)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -205,7 +233,7 @@ async def login(
         # nonexistent username is not distinguishable from a wrong password
         # by request latency (~250ms bcrypt vs. near-instant miss).
         verify_password(credentials.password, _DUMMY_HASH)
-        _register_login_failure(key)
+        await store.record(key, LOGIN_WINDOW_SECONDS)
         audit_logger.log_auth(
             "login", username=credentials.username, success=False,
             ip_address=request.client.host if request.client else None,
@@ -217,7 +245,7 @@ async def login(
         )
 
     if not verify_password(credentials.password, user.hashed_password):
-        _register_login_failure(key)
+        await store.record(key, LOGIN_WINDOW_SECONDS)
         audit_logger.log_auth(
             "login", username=credentials.username, success=False,
             ip_address=request.client.host if request.client else None,
@@ -234,7 +262,7 @@ async def login(
             detail="Inactive user"
         )
 
-    _clear_login_failures(key)
+    await store.reset(key)
     user.last_login = utcnow()
 
     access_token = create_access_token(
@@ -247,6 +275,11 @@ async def login(
     await _prune_expired_refresh_sessions(db)
     await db.commit()
 
+    # HttpOnly/Secure/SameSite cookies carry the session for the browser
+    # SPA (tokens stay out of JavaScript). The JSON body is kept for
+    # programmatic clients and tests; the SPA ignores it.
+    _set_auth_cookies(response, access_token, refresh_token)
+
     audit_logger.log_auth("login", user_id=str(user.id), username=user.username, success=True)
 
     return {
@@ -258,10 +291,20 @@ async def login(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    request: RefreshTokenRequest,
+    body: RefreshTokenRequest,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db)
 ):
-    payload = decode_token(request.refresh_token)
+    # Accept the refresh token from the HttpOnly cookie (browser SPA) or the
+    # JSON body (programmatic clients / tests).
+    refresh_token_value = body.refresh_token or request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    payload = decode_token(refresh_token_value)
 
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(
@@ -350,6 +393,8 @@ async def refresh_token(
     await _persist_refresh_session(db, user.id, new_refresh_jti)
     await db.commit()
 
+    _set_auth_cookies(response, access_token, new_refresh_token)
+
     audit_logger.log_auth(
         "refresh", user_id=str(user.id), username=user.username, success=True,
     )
@@ -363,17 +408,22 @@ async def refresh_token(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
-    request: LogoutRequest,
+    body: LogoutRequest,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Server-side logout: revoke the presented refresh token so it can never
-    be replayed or refreshed again. The short-lived access token naturally
-    expires on its own (default 30 min). Public + idempotent on purpose: the
-    only effect of a forged call is revoking a token the caller already
-    possessed, which is exactly what a legitimate logout should do.
+    """Server-side logout: revoke the presented refresh token (from the
+    HttpOnly cookie or the JSON body) so it can never be replayed or
+    refreshed again, then clear the auth cookies. The short-lived access
+    token naturally expires on its own (default 30 min). Public + idempotent
+    on purpose: the only effect of a forged call is revoking a token the
+    caller already possessed, which is exactly what a legitimate logout
+    should do.
     """
-    if request.refresh_token:
-        payload = decode_token(request.refresh_token)
+    refresh_token_value = body.refresh_token or request.cookies.get(REFRESH_COOKIE)
+    if refresh_token_value:
+        payload = decode_token(refresh_token_value)
         if payload and payload.get("type") == "refresh":
             jti = payload.get("jti")
             if jti:
@@ -389,6 +439,7 @@ async def logout(
                 "logout", user_id=str(user_id), username=username, success=True,
             )
             await db.commit()
+    _clear_auth_cookies(response)
     return None
 
 

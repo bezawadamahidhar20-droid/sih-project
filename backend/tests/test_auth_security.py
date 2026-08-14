@@ -19,6 +19,13 @@ async def _login(client: AsyncClient, username: str = "testuser", password: str 
     return resp.json()
 
 
+def _csrf(client: AsyncClient) -> dict:
+    """Double-submit CSRF header for requests that carry the auth cookies
+    the client's jar received at login (no Authorization header)."""
+    from tests.conftest import csrf_headers
+    return csrf_headers(client)
+
+
 class TestLogout:
     async def test_logout_revokes_refresh_token(self, client, test_user):
         tokens = await _login(client)
@@ -26,7 +33,11 @@ class TestLogout:
         access_headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 
         # Logout must invalidate the refresh token server-side.
-        logout = await client.post("/api/v1/auth/logout", json={"refresh_token": refresh_token})
+        logout = await client.post(
+            "/api/v1/auth/logout",
+            json={"refresh_token": refresh_token},
+            headers=_csrf(client),
+        )
         assert logout.status_code == 204
 
         # The still-valid short-lived access token keeps working until expiry.
@@ -35,7 +46,9 @@ class TestLogout:
 
         # The revoked refresh token can no longer be refreshed (replay).
         replay = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+            headers=_csrf(client),
         )
         assert replay.status_code == 401
 
@@ -43,7 +56,9 @@ class TestLogout:
         tokens = await _login(client)
         for _ in range(2):
             resp = await client.post(
-                "/api/v1/auth/logout", json={"refresh_token": tokens["refresh_token"]}
+                "/api/v1/auth/logout",
+                json={"refresh_token": tokens["refresh_token"]},
+                headers=_csrf(client),
             )
             assert resp.status_code == 204
 
@@ -75,7 +90,11 @@ class TestExpiredRefreshToken:
         )
         await db_session.commit()
 
-        resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+        resp = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": token},
+            headers=_csrf(client),
+        )
         assert resp.status_code == 401
         assert "expired" in resp.json()["detail"].lower()
 
@@ -89,11 +108,15 @@ class TestDbBackedRotation:
 
         tokens = await _login(client)
         r1 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": tokens["refresh_token"]},
+            headers=_csrf(client),
         )
         assert r1.status_code == 200
         r2 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": r1.json()["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": r1.json()["refresh_token"]},
+            headers=_csrf(client),
         )
         assert r2.status_code == 200
 
@@ -111,13 +134,17 @@ class TestDbBackedRotation:
 
         # First use rotates the token forward (this is legitimate).
         r1 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": tokens["refresh_token"]},
+            headers=_csrf(client),
         )
         assert r1.status_code == 200
 
         # Replaying the now-consumed token must be rejected…
         replay = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": tokens["refresh_token"]},
+            headers=_csrf(client),
         )
         assert replay.status_code == 401
 
@@ -128,7 +155,9 @@ class TestDbBackedRotation:
 
         # Even the freshly rotated refresh token cannot be used anymore.
         r2 = await client.post(
-            "/api/v1/auth/refresh", json={"refresh_token": r1.json()["refresh_token"]}
+            "/api/v1/auth/refresh",
+            json={"refresh_token": r1.json()["refresh_token"]},
+            headers=_csrf(client),
         )
         assert r2.status_code == 401
 
@@ -141,7 +170,11 @@ class TestDbBackedRotation:
         legacy = create_refresh_token(
             data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
         )
-        first = await client.post("/api/v1/auth/refresh", json={"refresh_token": legacy})
+        first = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": legacy}, headers=_csrf(client)
+        )
         assert first.status_code == 200
-        replay = await client.post("/api/v1/auth/refresh", json={"refresh_token": legacy})
+        replay = await client.post(
+            "/api/v1/auth/refresh", json={"refresh_token": legacy}, headers=_csrf(client)
+        )
         assert replay.status_code == 401

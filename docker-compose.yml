@@ -82,6 +82,11 @@ services:
       # 500) instead of serving guessed diagnoses. Only flip this for an
       # explicit dev/demo environment.
       ALLOW_HEURISTIC_FALLBACK: ${ALLOW_HEURISTIC_FALLBACK:-false}
+      # Shared security state (rate limiting / login lockout). Default false
+      # for the single-worker demo; set USE_REDIS=true before scaling to
+      # multiple workers (WORKERS>1 is refused otherwise).
+      USE_REDIS: ${USE_REDIS:-false}
+      REDIS_URL: redis://redis:6379/0
       LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
       HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
@@ -90,6 +95,14 @@ services:
       - logs:/app/logs
       # Drop a trained model.pth into ./backend/models to enable CNN + Grad-CAM
       - ./backend/models:/app/models:ro
+    networks: [mediscan]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No host port: Redis is only reachable inside the stack. Used for shared
+    # rate limiting / login lockout when USE_REDIS=true (needed to scale
+    # beyond one worker); with USE_REDIS=false (the default) it stays idle.
     networks: [mediscan]
 
   frontend:

@@ -20,6 +20,8 @@ asyncpg==0.29.0
 aiosqlite==0.22.1
 httpx==0.28.1
 python-json-logger==4.1.0
+# Shared security state (rate limiting / lockout) when USE_REDIS=true
+redis>=5.0.0
 # Data-prep script (app/models/prepare_data.py) — was missing entirely.
 pyarrow==25.0.0
 reportlab>=4.0.0

@@ -46,26 +46,17 @@ async def override_get_db():
 
 
 @pytest.fixture(autouse=True)
-def _reset_login_rate_limiter():
-    """The login rate limiter and the consumed-refresh-token store are
-    process-global in-memory stores; clear them between tests so failed-login
-    / refresh-rotation tests never bleed into the next one."""
-    from app.api.routes.auth import _LOGIN_FAILURES, _CONSUMED_REFRESH_JTIS
-    _LOGIN_FAILURES.clear()
+async def _reset_security_state():
+    """The login lockout / endpoint rate-limiters share one sliding-window
+    store and the consumed-refresh-token set is process-global; clear them
+    between tests so failed-login / rate-limit / refresh-rotation tests never
+    bleed into the next one."""
+    from app.api.routes.auth import _CONSUMED_REFRESH_JTIS
+    from app.core.stores import get_security_store
     _CONSUMED_REFRESH_JTIS.clear()
+    await get_security_store().clear_all()
     yield
-
-
-@pytest.fixture(autouse=True)
-def _reset_endpoint_rate_limiters():
-    """Clear the upload/predict sliding-window limiters between tests so a
-    test that exhausts a budget cannot bleed into the next one."""
-    from app.core.ratelimit import upload_limiter, predict_limiter
-    upload_limiter.clear()
-    predict_limiter.clear()
-    yield
-    upload_limiter.clear()
-    predict_limiter.clear()
+    await get_security_store().clear_all()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -135,6 +126,14 @@ async def test_staff(db_session):
     await db_session.commit()
     await db_session.refresh(user)
     return user
+
+
+def csrf_headers(client: AsyncClient) -> dict:
+    """Build the double-submit CSRF header from the csrf_token cookie the
+    client's jar received at login. Returns {} when no cookie is present so
+    it is safe to attach unconditionally to every request."""
+    token = client.cookies.get("csrf_token")
+    return {"X-CSRF-Token": token} if token else {}
 
 
 @pytest.fixture

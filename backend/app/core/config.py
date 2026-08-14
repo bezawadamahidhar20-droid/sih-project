@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     database_max_overflow: int = 20
 
     redis_url: str = "redis://localhost:6379/0"
+    # When true, rate limiting + login lockout use the shared Redis store so
+    # security state is correct across multiple workers/instances. When false
+    # (default, single worker), an in-process store is used. WORKERS>1 is
+    # rejected unless this is enabled (see the validator below).
+    use_redis: bool = False
 
     model_path: str = "/app/models/model.pth"
     model_architecture: str = "resnet50"
@@ -87,6 +92,13 @@ class Settings(BaseSettings):
     trust_proxy_headers: bool = False
 
     seed_demo_users: bool = False
+    # Demo scan seeding (dev-only script) — off in production by default.
+    seed_demo_scans: bool = False
+
+    # Auth cookies. ``cookie_secure`` defaults to True in production (cookies
+    # are only ever sent over HTTPS) and False in development so local http
+    # development works out of the box.
+    cookie_secure: Optional[bool] = None
 
     # Fail fast in production: refuse placeholder secrets so a misconfigured
     # deployment can never start with forgeable JWTs / decryptable data.
@@ -105,6 +117,22 @@ class Settings(BaseSettings):
                         "provide them via environment variables — never ship "
                         "well-known credentials to production."
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_cookie_secure_and_worker_safety(self) -> "Settings":
+        if self.cookie_secure is None:
+            self.cookie_secure = self.environment.lower() == "production"
+        # Security-critical state (rate limits, lockout, refresh sessions) is
+        # either in-process (single worker only) or Redis-backed. Silently
+        # running several workers with in-process state would make the login
+        # lockout and rate limits per-process and bypassable.
+        if self.workers > 1 and not self.use_redis:
+            raise ValueError(
+                "WORKERS must be 1 when USE_REDIS=false: the login lockout and "
+                "endpoint rate limiters are in-process stores. Set USE_REDIS=true "
+                "(with a reachable REDIS_URL) before scaling to multiple workers."
+            )
         return self
 
     @model_validator(mode="after")

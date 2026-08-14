@@ -47,6 +47,16 @@ function isNetworkError(err: unknown): boolean {
 }
 
 /**
+ * Read the double-submit CSRF token from its (non-HttpOnly) cookie. This is
+ * a random non-credential — safe for JavaScript to read; the HttpOnly
+ * access/refresh cookies are never exposed here.
+ */
+function getCsrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+/**
  * Demo fallback is allowed ONLY when demo mode is explicitly enabled AND the
  * backend is genuinely unreachable (no HTTP response). Any HTTP status — even
  * a 500 — means the backend IS reachable and its error is surfaced as-is.
@@ -57,20 +67,31 @@ function canFallbackToDemo(err: unknown): boolean {
 
 class ApiService {
   private client: AxiosInstance;
-  private refreshTokenPromise: Promise<string> | null = null;
+  private refreshTokenPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
+      // Authentication is cookie-based (HttpOnly access/refresh cookies set
+      // by the backend). withCredentials ensures cookies are sent and stored
+      // on every request, including cross-origin API calls (VITE_API_URL).
+      withCredentials: true,
       headers: { 'Content-Type': 'application/json' },
       timeout: 120000,
     });
 
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem('access_token');
-        if (token && config.headers) {
-          config.headers.Authorization = `Bearer ${token}`;
+        // No Authorization header: tokens live in HttpOnly cookies that
+        // JavaScript cannot read. Attach the double-submit CSRF token to
+        // state-changing requests (it is a non-credential, JS-readable by
+        // design so the SPA can echo it).
+        const method = (config.method ?? 'get').toLowerCase();
+        if (method !== 'get' && method !== 'head' && method !== 'options') {
+          const csrf = getCsrfToken();
+          if (csrf && config.headers) {
+            config.headers['X-CSRF-Token'] = csrf;
+          }
         }
         return config;
       },
@@ -83,16 +104,22 @@ class ApiService {
         const originalRequest = error.config as InternalAxiosRequestConfig & {
           _retry?: boolean;
         };
-        if (error.response?.status === 401 && !originalRequest._retry && !demoMode) {
+        // 401 = access cookie expired/revoked: refresh via the HttpOnly
+        // refresh cookie, then replay the original request. Never in demo
+        // mode, and never on the refresh call itself.
+        if (
+          error.response?.status === 401 &&
+          !originalRequest._retry &&
+          !demoMode &&
+          !originalRequest.url?.includes('/auth/refresh') &&
+          !originalRequest.url?.includes('/auth/login')
+        ) {
           originalRequest._retry = true;
           if (!this.refreshTokenPromise) {
             this.refreshTokenPromise = this.refreshAccessToken();
           }
           try {
-            const newToken = await this.refreshTokenPromise;
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            }
+            await this.refreshTokenPromise;
             return this.client(originalRequest);
           } catch {
             this.logout();
@@ -107,37 +134,38 @@ class ApiService {
     );
   }
 
-  private async refreshAccessToken(): Promise<string> {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) throw new Error('No refresh token');
-    const response = await axios.post<Token>(`${API_BASE_URL}/auth/refresh`, {
-      refresh_token: refreshToken,
-    });
-    const { access_token, refresh_token } = response.data;
-    localStorage.setItem('access_token', access_token);
-    localStorage.setItem('refresh_token', refresh_token);
-    return access_token;
+  private async refreshAccessToken(): Promise<boolean> {
+    // The refresh token travels in the HttpOnly refresh_token cookie; the
+    // server rotates it and sets fresh cookies on the response. JavaScript
+    // never sees or stores any token.
+    await this.client.post('/auth/refresh', {});
+    return true;
   }
 
   logout(): void {
-    // Server-side revocation: tell the backend to burn the refresh token so
-    // it can never be replayed, then drop local state. Fire-and-forget with
+    // Server-side revocation: burn the refresh session (HttpOnly cookie is
+    // sent automatically) and clear the auth cookies. Fire-and-forget with
     // a plain axios call (no interceptors, no refresh loop) — a network
     // failure here must not block local sign-out.
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
+    if (!demoMode) {
+      const csrf = getCsrfToken();
       axios
         .post(
           `${API_BASE_URL}/auth/logout`,
-          { refresh_token: refreshToken },
-          { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+          {},
+          {
+            timeout: 5000,
+            withCredentials: true,
+            headers: {
+              'Content-Type': 'application/json',
+              ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+            },
+          }
         )
         .catch(() => {
           /* local cleanup happens regardless */
         });
     }
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
     localStorage.removeItem('demo_mode');
     demoMode = false;
@@ -150,10 +178,10 @@ class ApiService {
 
   async login(credentials: LoginRequest): Promise<Token> {
     try {
+      // The backend sets HttpOnly access/refresh cookies + the csrf_token
+      // cookie on success. The JSON body tokens are intentionally ignored —
+      // nothing is ever written to localStorage.
       const response = await this.client.post<Token>('/auth/login', credentials);
-      const { access_token, refresh_token } = response.data;
-      localStorage.setItem('access_token', access_token);
-      localStorage.setItem('refresh_token', refresh_token);
       demoMode = false;
       localStorage.removeItem('demo_mode');
       return response.data;
@@ -172,12 +200,13 @@ class ApiService {
         fakeErr.response = { data: { detail: 'Invalid username or password. Use: doctor / radiologist / staff with password DemoPass123!' } };
         throw fakeErr;
       }
+      // Demo mode stores NO tokens (not even placeholders): demo requests
+      // are served locally from the mock store, so nothing credential-like
+      // ever touches localStorage.
       demoMode = true;
       demoUser = entry.user;
       localStorage.setItem('demo_mode', '1');
-      localStorage.setItem('access_token', 'demo-token');
-      localStorage.setItem('refresh_token', 'demo-refresh-token');
-      return { access_token: 'demo-token', refresh_token: 'demo-refresh-token', token_type: 'bearer' };
+      return { access_token: '', refresh_token: '', token_type: 'bearer' };
     }
   }
 

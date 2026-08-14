@@ -1,4 +1,13 @@
-"""Seed script to populate dev database with 6 realistic sample scans and pre-computed predictions.
+"""Seed script to populate the database with 6 DEMO scans + pre-computed predictions.
+
+DEMO DATA — opt-in only:
+    SEED_DEMO_SCANS=true python seed_demo_scans.py
+
+The script refuses to run in a production environment unless SEED_DEMO_SCANS=true.
+Seeded images are procedurally-generated synthetic scans (not patient data),
+encrypted at rest like any real upload. Pre-computed predictions are clearly
+fabricated DEMO data for presentation/browsing only.
+
 Usage:
     python seed_demo_scans.py
 """
@@ -14,6 +23,7 @@ from sqlalchemy import select
 
 from app.db.session import async_session_maker, init_db
 from app.db.models import Scan, Prediction, User, UserRole, ScanStatus
+from app.core.config import get_settings
 from app.core.security import get_password_hash, encrypt_file
 
 DEMO_SCANS_DATA = [
@@ -92,7 +102,45 @@ DEMO_SCANS_DATA = [
 ]
 
 
+def _synthetic_scan_image(seed: int) -> bytes:
+    """Procedurally generate a clearly-synthetic chest-X-ray-like PNG.
+
+    Noise + smooth gradient + a few soft blobs — NOT a medical image and
+    NOT patient data. Used so demo rows point at real encrypted artifacts.
+    """
+    import io
+
+    import numpy as np
+    from PIL import Image, ImageFilter
+
+    rng = np.random.default_rng(seed)
+    size = 512
+    base = rng.normal(0.5, 0.12, (size, size)).astype(np.float32)
+    # Soft blob(s) to look scan-like without resembling any anatomy.
+    for _ in range(4):
+        cy, cx = rng.integers(80, size - 80, 2)
+        r = int(rng.integers(40, 90))
+        yy, xx = np.ogrid[:size, :size]
+        base += 0.35 * np.exp(-(((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * r * r)))
+    img = Image.fromarray(np.clip(base, 0, 1) * 255).convert("L").convert("RGB")
+    img = img.filter(ImageFilter.GaussianBlur(1.2))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 async def seed_demo_data():
+    settings = get_settings()
+    # Demo scan seeding is OPT-IN: SEED_DEMO_SCANS=true, or any non-production
+    # environment (dev default). Never silently in production.
+    if not (settings.seed_demo_scans or settings.environment != "production"):
+        print(
+            "[seed] SKIPPED — demo scan seeding is opt-in. "
+            "Run with SEED_DEMO_SCANS=true (non-production) to populate "
+            "demo scans and pre-computed predictions."
+        )
+        return
+
     await init_db()
     async with async_session_maker() as session:
         # Get or create admin/doctor user
@@ -112,15 +160,40 @@ async def seed_demo_data():
             await session.refresh(doctor)
 
         print(f"[seed] Using user '{doctor.username}' (id={doctor.id})")
+        print("[seed] DEMO DATA — synthetic images + pre-computed predictions. Not for clinical use.")
+
+        # Make sure the storage dirs exist before writing encrypted artifacts.
+        upload_dir = Path(settings.upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        gradcam_dir = upload_dir / "gradcam"
+        gradcam_dir.mkdir(parents=True, exist_ok=True)
 
         scans_created = 0
-        for item in DEMO_SCANS_DATA:
+        for idx, item in enumerate(DEMO_SCANS_DATA):
             file_hash = uuid.uuid4().hex
+            # Encrypt a real (synthetic, non-PHI) PNG so demo rows point at
+            # actual artifacts the API can serve — no stale references.
+            synthetic = _synthetic_scan_image(seed=idx + 1)
+            encrypted_upload = upload_dir / f"{file_hash}.enc"
+            with open(upload_dir / f"{file_hash}.png", "wb") as f:
+                f.write(synthetic)
+            encrypt_file(str(upload_dir / f"{file_hash}.png"), str(encrypted_upload))
+            (upload_dir / f"{file_hash}.png").unlink(missing_ok=True)
+            # Derived ORIGINAL render (encrypted at rest) so the scan image
+            # is viewable in the UI. No fabricated Grad-CAM is created.
+            with open(gradcam_dir / f"original_{file_hash}.png", "wb") as f:
+                f.write(synthetic)
+            encrypt_file(
+                str(gradcam_dir / f"original_{file_hash}.png"),
+                str(gradcam_dir / f"original_{file_hash}.png.enc"),
+            )
+            (gradcam_dir / f"original_{file_hash}.png").unlink(missing_ok=True)
+
             scan = Scan(
                 file_hash=file_hash,
-                original_filename=item["filename"],
-                encrypted_path=f"uploads/{file_hash}.enc",
-                file_size=245000,
+                original_filename=f"[DEMO] {item['filename']}",
+                encrypted_path=str(encrypted_upload),
+                file_size=len(synthetic),
                 mime_type="image/png",
                 anonymized_patient_id=item["patient_id"],
                 study_date=datetime.now(timezone.utc),

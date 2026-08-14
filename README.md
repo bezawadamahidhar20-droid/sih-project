@@ -96,6 +96,17 @@ is role-based, and low-confidence results are surfaced loudly instead of hidden.
   instantly. Login failures are keyed on the proxy-aware client IP and
   bcrypt timing is equalized for unknown usernames, so neither lockouts nor
   account-existence probing can follow a spoofed or shared proxy address.
+- **HttpOnly cookie sessions (no tokens in JavaScript)**: the browser SPA
+  authenticates with `HttpOnly` + `SameSite` + `Secure` cookies set by the
+  backend — access tokens and refresh tokens are **never stored in
+  `localStorage`** and JavaScript cannot read them. CSRF is mitigated with
+  a SameSite policy + Origin verification + a double-submit `csrf_token`
+  cookie echoed in the `X-CSRF-Token` header on every state-changing
+  request. Programmatic clients can still use `Authorization: Bearer`.
+- **Shared security state**: rate limiting and login lockout run on a
+  sliding-window store that is in-process by default (single worker) and
+  Redis-backed with `USE_REDIS=true` when scaling to multiple workers
+  (`WORKERS>1` is refused at startup unless Redis is enabled).
 - **Clinical safety UX**: predictions below the 70% confidence threshold are
   flagged, high-risk findings are emphasized, and doctors can flag results for
   review. Model selection during training prioritizes **sensitivity** (minimize
@@ -310,8 +321,12 @@ docker compose up --build
   proxy (Intranet/HTTPS proxy -> frontend -> backend).
 * Postgres is internal to the compose network; scans persist in named volumes.
 * HTTPS/TLS: terminate at a reverse proxy / load balancer in front of the
-  stack (`SSL_CERTFILE`/`SSL_KEYFILE` in the backend `.env` can also enable
-  uvicorn TLS directly).
+  stack — a production nginx template (TLS, HSTS, HTTP→HTTPS redirect,
+  security headers) ships at `deploy/nginx-production.conf.example` with
+  placeholder certificate paths. `SSL_CERTFILE`/`SSL_KEYFILE` in the backend
+  `.env` can also enable uvicorn TLS directly.
+* Redis is included in the stack (no host port) and stays idle unless
+  `USE_REDIS=true`; enable it before scaling `WORKERS` above 1.
 * The trained model is enabled by default: `model.pth` is bind-mounted
   read-only into the container from `./backend/models/`.
 * If no model file is present and `ALLOW_HEURISTIC_FALLBACK` is unset/false,
@@ -391,9 +406,10 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 102 tests (validation, cleanup, security, RBAC, ML safety, rate limits,
+# Backend — 122 tests (validation, cleanup, security, RBAC, ML safety, rate limits,
 # image-quality gate, token rotation/revocation, IDOR cross-doctor attacks, logout,
-# refresh replay/family revocation, DICOM PHI, real-CNN inference probe)
+# refresh replay/family revocation, HttpOnly-cookie auth, CSRF, DICOM PHI,
+# real-CNN inference probe)
 cd backend
 .venv/Scripts/python -m pytest -q
 

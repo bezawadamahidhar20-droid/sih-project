@@ -101,7 +101,10 @@ class LoginRequest(BaseModel):
 
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    # Optional: the browser SPA refreshes via the HttpOnly refresh_token
+    # cookie (JavaScript cannot read it), so the body token is only used by
+    # programmatic clients / tests.
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):

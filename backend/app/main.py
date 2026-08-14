@@ -1,3 +1,4 @@
+import secrets
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -54,6 +55,66 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# CSRF protection (authentication uses HttpOnly cookies).
+#
+# Two independent layers, per OWASP guidance:
+#   1. Origin check — state-changing requests carrying an ``Origin`` header
+#      whose value is not a configured frontend origin are rejected. Cross-
+#      site form/fetch attacks always send an attacker Origin.
+#   2. Double-submit token — requests authenticated by cookie (no
+#      Authorization header) must echo the ``csrf_token`` cookie in the
+#      ``X-CSRF-Token`` header. A cross-site attacker cannot read the cookie
+#      (same-origin policy) and therefore cannot forge the header.
+#
+# Requests authenticated with a Bearer header are not cookie-authenticated
+# and are exempt — an attacker cannot forge the Authorization header
+# cross-site, so there is no CSRF surface there.
+# ---------------------------------------------------------------------------
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+_CSRF_COOKIE = "csrf_token"
+_CSRF_HEADER = "X-CSRF-Token"
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    if request.method in _CSRF_SAFE_METHODS:
+        return await call_next(request)
+
+    # Layer 1: origin verification (applies to every state-changing request
+    # that carries an Origin header, including login).
+    origin = request.headers.get("origin")
+    if origin and origin not in settings.cors_origins:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "CSRF validation failed", "error_code": "CSRF_FAILED"},
+        )
+
+    # Layer 2: double-submit token for cookie-authenticated requests.
+    # Requests carrying an Authorization header are bearer-authenticated and
+    # exempt: a cross-site attacker cannot forge that header, so there is no
+    # CSRF surface. Only pure-cookie sessions (the browser SPA) need the
+    # double-submit token.
+    cookie_authenticated = (
+        "access_token" in request.cookies or "refresh_token" in request.cookies
+    )
+    if not cookie_authenticated or request.headers.get("authorization"):
+        return await call_next(request)
+
+    cookie_token = request.cookies.get(_CSRF_COOKIE)
+    header_token = request.headers.get(_CSRF_HEADER)
+    if (
+        not cookie_token
+        or not header_token
+        or not secrets.compare_digest(cookie_token, header_token)
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "CSRF validation failed", "error_code": "CSRF_FAILED"},
+        )
+
+    return await call_next(request)
 
 
 @app.middleware("http")
