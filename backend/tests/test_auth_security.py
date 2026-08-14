@@ -52,6 +52,34 @@ class TestLogout:
         assert resp.status_code == 204
 
 
+class TestExpiredRefreshToken:
+    async def test_expired_db_session_rejected(self, client, test_user, db_session):
+        """A refresh token whose RefreshSession row has expired must be
+        rejected (the DB row is the source of truth for session lifetime,
+        independent of the JWT's own exp claim)."""
+        from datetime import timedelta
+
+        from app.core.security import create_refresh_token_with_jti
+        from app.core.timeutil import utcnow
+        from app.db.models import RefreshSession
+
+        token, jti = create_refresh_token_with_jti(
+            data={"sub": str(test_user.id), "role": test_user.role.value, "ver": 0},
+        )
+        db_session.add(
+            RefreshSession(
+                user_id=test_user.id,
+                jti=jti,
+                expires_at=utcnow() - timedelta(minutes=5),  # already expired
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+        assert resp.status_code == 401
+        assert "expired" in resp.json()["detail"].lower()
+
+
 class TestDbBackedRotation:
     async def test_login_refresh_rotation_via_db(self, client, test_user):
         from sqlalchemy import select

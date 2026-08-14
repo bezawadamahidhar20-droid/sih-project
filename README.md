@@ -391,7 +391,9 @@ docker-compose.yml   # postgres + backend + frontend
 ## Testing
 
 ```bash
-# Backend — 70 tests (validation, cleanup, security, RBAC, ML safety, rate limits, image-quality gate, token rotation/revocation)
+# Backend — 102 tests (validation, cleanup, security, RBAC, ML safety, rate limits,
+# image-quality gate, token rotation/revocation, IDOR cross-doctor attacks, logout,
+# refresh replay/family revocation, DICOM PHI, real-CNN inference probe)
 cd backend
 .venv/Scripts/python -m pytest -q
 
@@ -402,14 +404,20 @@ npm run build
 
 ## Roadmap status
 
-| Step | Status | Clinical Validation Metrics |
+| Step | Status | Hold-Out Evaluation Metrics (internal) |
 | --- | --- | --- |
 | 1. Dataset collection & preprocessing | ✅ Complete | Kaggle Chest X-Ray dataset (5,856 train/val/test images) |
 | 2. Model architecture & training | ✅ Complete | ResNet50 Transfer Learning trained (`backend/models/model.pth`) |
 | 3. Web application | ✅ Complete | Full-stack FastAPI + React 19 MUI Workstation |
 | 4. Data security & privacy | ✅ Complete | DICOM PHI stripping, AES-256 Fernet at rest, RBAC, JWT rotation |
-| 5. Quality control & clinical validation | ✅ Complete | **90.22% Accuracy**, **92.31% Sensitivity**, **87.29% Specificity**, **95.85% ROC AUC** (624 test studies) |
-| 6. Compliance & deployment | ✅ Complete | Docker Compose, HIPAA audit logs, automated test suite |
+| 5. Quality control & internal evaluation | ✅ Complete | **86.06% Accuracy**, **83.08% Sensitivity**, **91.03% Specificity**, **95.03% ROC AUC** (624 hold-out test studies — reported in `backend/models/model.evaluation.json`, served by `/api/v1/health`) |
+| 6. Compliance & deployment | ✅ Complete | Docker Compose, audit logs, automated test suite |
+
+> ⚠️ **Metric honesty.** The roadmap figures are *internal hold-out evaluation*
+> on the Kaggle Chest X-Ray dataset — not clinical validation. No FDA/CE
+> clearance or real-world clinical validation has been performed; an
+> out-of-distribution sanity check on Wikimedia images is described in the
+> [Features](#features) section and must not be read as clinical evidence.
 
 ## Contributing
 

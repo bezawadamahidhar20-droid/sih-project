@@ -33,6 +33,8 @@ import { LoginCanvas } from '../components/common/LoginCanvas';
 import { TiltCard } from '../components/common/TiltCard';
 import { ThreeDMedicalScene } from '../components/common/ThreeDMedicalScene';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
+import { HealthResponse } from '../types';
 import { tokens } from '../theme';
 
 const FEATURES = [
@@ -68,6 +70,17 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(() => Boolean(localStorage.getItem('mediscan_remember_username')));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Real engine metrics from the public /api/v1/health endpoint — never
+  // fabricated numbers. When the backend is unreachable, neutral text is
+  // shown instead of invented performance claims.
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+
+  useEffect(() => {
+    api
+      .healthCheck()
+      .then(setHealth)
+      .catch(() => setHealth(null));
+  }, []);
 
   useEffect(() => {
     if (!rememberMe) localStorage.removeItem('mediscan_remember_username');
@@ -289,30 +302,32 @@ export function LoginPage() {
             </Stack>
           </Box>
 
-          {/* Live Telemetry Footer */}
+          {/* Live Telemetry Footer — real values from /api/v1/health only */}
           <Stack direction="row" spacing={3} sx={{ justifyContent: 'space-between', alignItems: 'center', pt: 3 }}>
             <Box>
               <Typography variant="caption" sx={{ color: tokens.textSecondary, display: 'block' }}>
                 Model Performance
               </Typography>
               <Typography variant="subtitle2" sx={{ color: tokens.confidenceHigh, fontFamily: 'monospace' }}>
-                98.4% ROC-AUC
+                {health?.model_metrics?.auc != null
+                  ? `${(health.model_metrics.auc * 100).toFixed(1)}% ROC-AUC (hold-out)`
+                  : 'Decision support only'}
               </Typography>
             </Box>
             <Box>
               <Typography variant="caption" sx={{ color: tokens.textSecondary, display: 'block' }}>
-                Avg Latency
+                Inference Engine
               </Typography>
               <Typography variant="subtitle2" sx={{ color: tokens.cyan, fontFamily: 'monospace' }}>
-                120 ms
+                {health ? `${health.engine}${health.device ? ' · ' + health.device : ''}` : '—'}
               </Typography>
             </Box>
             <Box>
               <Typography variant="caption" sx={{ color: tokens.textSecondary, display: 'block' }}>
-                Security Standard
+                Security Controls
               </Typography>
               <Typography variant="subtitle2" sx={{ color: tokens.textPrimary, fontFamily: 'monospace' }}>
-                HIPAA / DICOM Part 10
+                JWT · RBAC · AES-256
               </Typography>
             </Box>
           </Stack>
