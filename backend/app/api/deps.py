@@ -111,19 +111,6 @@ require_doctor = require_roles(UserRole.DOCTOR, UserRole.RADIOLOGIST)
 require_staff_or_above = require_roles(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.STAFF)
 
 
-async def get_optional_user(
-    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
-    db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    if not credentials:
-        return None
-    
-    try:
-        return await get_current_user(credentials, db)
-    except HTTPException:
-        return None
-
-
 def rate_limit(limiter):
     """Dependency factory: enforce a sliding-window rate limit per user.
 

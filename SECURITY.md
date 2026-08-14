@@ -33,7 +33,9 @@ upload + own scans only. Roles are enforced on every route via
 | Resource | Prediction creator / scan uploader | Other doctor/radiologist | Staff (non-owner) | Unauthenticated |
 | --- | --- | --- | --- | --- |
 | Scan list / detail / patient history | ALLOW | ALLOW (full diagnostic access) | Own scans only | 401 |
-| Prediction list / detail | ALLOW | ALLOW | Own scans only | 401 |
+| Prediction list | ALLOW | ALLOW (clinical visibility) | Own scans only | 401 |
+| **Prediction detail (by ID)** | ALLOW | DENY (404) | Own scans only | 401 |
+| **Predict scan** (POST `/predictions/predict/{id}`) | ALLOW (uploader, or already predicted) | DENY (404) | Own scans only | 401 |
 | **Flag prediction** | ALLOW | DENY (404) | DENY (403 role) | 401 |
 | **Prediction PDF** | ALLOW | DENY (404) | DENY (404) | 401 |
 | **Condition heatmap** | ALLOW | DENY (404) | DENY (404) | 401 |
@@ -44,6 +46,16 @@ upload + own scans only. Roles are enforced on every route via
 Denied cross-user access returns a plain `404 Not Found` so the existence of
 another clinician's record is never disclosed (no `Prediction belongs to
 Doctor B` style leaks).
+
+The two-layer model is deliberate: the doctor/radiologist LIST views
+(`list_predictions`, patient history) expose the anonymized clinical layer
+(patient IDs are opaque tokens; doctors are the trusted clinical layer and
+multi-doctor review is a supported workflow), while every object-level
+content endpoint — PDF, heatmaps, derived images, prediction-by-ID, and
+**creating** a prediction — is owner-scoped. `POST /predictions/predict/{id}`
+applies the same uploader-or-already-predicted rule server-side, so a doctor
+can never obtain access to a peer's scan by predicting it (predict-then-access
+BOLA regression-tested with a two-doctor probe).
 
 ## 3. Data protection
 

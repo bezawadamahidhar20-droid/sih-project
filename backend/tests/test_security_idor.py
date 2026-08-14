@@ -21,10 +21,10 @@ import os
 import numpy as np
 from httpx import AsyncClient
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.core.security import get_password_hash
-from app.db.models import User, UserRole
+from app.db.models import Scan, User, UserRole
 
 
 def make_png_bytes(size: int = 256) -> bytes:
@@ -98,6 +98,16 @@ class TestCrossDoctorIDOR:
         _, _, pred = await self._setup(client, db_session, test_user)
         resp = await client.get(
             f"/api/v1/predictions/{pred['id']}/pdf", headers=auth_headers
+        )
+        assert resp.status_code == 404
+
+    async def test_doctor_a_cannot_read_doctors_b_prediction(self, client, db_session, test_user, auth_headers):
+        """The by-ID prediction endpoint is owner-scoped like flag/PDF/heatmap:
+        a peer must not read a specific prediction record (the doctor-wide
+        LIST view remains the intentional clinical-visibility surface)."""
+        _, _, pred = await self._setup(client, db_session, test_user)
+        resp = await client.get(
+            f"/api/v1/predictions/{pred['id']}", headers=auth_headers
         )
         assert resp.status_code == 404
 
@@ -175,6 +185,225 @@ class TestCrossDoctorIDOR:
         assert pdf.status_code == 401
         heatmap = await client.get(f"/api/v1/predictions/{pred['id']}/heatmap/Normal")
         assert heatmap.status_code == 401
+
+
+class TestPredictThenAccessBOLA:
+    """Regression: predicting a scan must never grant access to a peer's
+    scan (predict-then-access BOLA).
+
+    Live-confirmed during the independent audit: POST /predictions/predict
+    had no ownership filter for doctors, so doctor B could predict doctor
+    A's scan and the resulting prediction (owned by B) immediately unlocked
+    A's PDF report, Grad-CAM heatmap and derived images — defeating the
+    owner-scoped resource boundary that the flag/PDF/heatmap/image endpoints
+    deliberately enforce. The predict endpoint must now apply the same rule:
+    a doctor may only predict a scan they uploaded or already predicted.
+    """
+
+    @staticmethod
+    async def _upload_scan(client: AsyncClient, headers: dict) -> dict:
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", make_png_bytes(), "image/png")},
+            headers=headers,
+        )
+        assert upload.status_code == 201, upload.text
+        return upload.json()
+
+    @staticmethod
+    async def _make_doctor(db_session, username: str) -> User:
+        doctor = User(
+            username=username,
+            email=f"{username}@example.com",
+            hashed_password=get_password_hash("testpass123"),
+            role=UserRole.DOCTOR,
+            is_active=True,
+        )
+        db_session.add(doctor)
+        await db_session.commit()
+        await db_session.refresh(doctor)
+        return doctor
+
+    async def test_doctor_b_cannot_predict_doctors_a_scan(self, client, db_session, test_user, auth_headers):
+        # Doctor A uploads a scan.
+        scan = await self._upload_scan(client, auth_headers)
+
+        # Doctor B is a different doctor with no relationship to the scan.
+        await self._make_doctor(db_session, "bola_b")
+        b_headers = await _login(client, "bola_b", "testpass123")
+
+        # THE ATTACK: predict A's scan. Denied with a safe 404 (existence
+        # not disclosed), and no prediction is created for B.
+        resp = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=b_headers
+        )
+        assert resp.status_code == 404, resp.text
+
+        # B's prediction list must not contain anything for A's scan.
+        preds = (await client.get("/api/v1/predictions", headers=b_headers)).json()[
+            "predictions"
+        ]
+        assert not [p for p in preds if p["scan_id"] == scan["id"]]
+
+    async def test_doctor_b_attempt_leaves_owner_resources_protected(self, client, db_session, test_user, auth_headers):
+        # Even after B's denied attempt, the scan stays fully owner-scoped:
+        # B cannot reach the scan row, its derived images, or a (nonexistent)
+        # prediction's PDF — every probe answers 404/404.
+        scan = await self._upload_scan(client, auth_headers)
+        await self._make_doctor(db_session, "bola_b2")
+        b_headers = await _login(client, "bola_b2", "testpass123")
+
+        await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=b_headers
+        )
+
+        derived = await client.get(
+            f"/api/v1/predictions/image/gradcam_{scan['file_hash']}.png",
+            headers=b_headers,
+        )
+        assert derived.status_code == 404
+        pdf = await client.get("/api/v1/predictions/999999/pdf", headers=b_headers)
+        assert pdf.status_code == 404
+
+        # The owner still has full functionality.
+        ok = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=auth_headers
+        )
+        assert ok.status_code == 200, ok.text
+
+    async def test_owner_can_still_predict_own_scan(self, client, db_session, test_user, auth_headers):
+        scan = await self._upload_scan(client, auth_headers)
+        resp = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["prediction"]["scan_id"] == scan["id"]
+
+    async def test_doctor_with_existing_prediction_can_repredict(self, client, db_session, test_user, auth_headers):
+        """Legacy rows (created before the guard) keep working: a doctor who
+        already predicted a scan already holds the derived-resource access, so
+        re-predicting grants nothing new and must not regress."""
+        from app.db.models import Prediction, ScanStatus
+
+        scan = await self._upload_scan(client, auth_headers)
+        doctor_b = await self._make_doctor(db_session, "bola_legacy")
+
+        db_session.add(
+            Prediction(
+                scan_id=scan["id"],
+                user_id=doctor_b.id,
+                predicted_class="Normal",
+                confidence=0.99,
+                all_probabilities='{"Normal": 0.99, "Pneumonia": 0.01}',
+                model_version="test",
+                model_architecture="resnet50",
+            )
+        )
+        scan_row = (
+            await db_session.execute(
+                select(Scan).where(Scan.id == scan["id"])
+            )
+        ).scalar_one()
+        scan_row.status = ScanStatus.COMPLETED
+        await db_session.commit()
+
+        b_headers = await _login(client, "bola_legacy", "testpass123")
+        resp = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=b_headers
+        )
+        assert resp.status_code == 200, resp.text
+        # The cached prediction returned is B's own (the only one for the
+        # scan — the unique scan_id constraint enforces single-use). The
+        # response schema omits user_id, so prove ownership via B's unique
+        # row values (confidence 0.99) and the scan linkage.
+        body = resp.json()
+        assert body["prediction"]["scan_id"] == scan["id"]
+        assert body["prediction"]["confidence"] == 0.99
+        row = (
+            await db_session.execute(
+                select(Prediction).where(Prediction.scan_id == scan["id"])
+            )
+        ).scalar_one()
+        assert row.user_id == doctor_b.id
+
+
+class TestPatientHistoryAuthorization:
+    """The patient-history endpoint is intentionally doctor/radiologist-wide
+    (anonymized opaque patient IDs, no per-doctor ownership filter — the
+    same model list_predictions uses, documented on the endpoint). The
+    invariants that MUST hold: only DOCTOR/RADIOLOGIST roles can call it
+    (staff is scoped to their own uploads and gets 403), and the data is
+    keyed only by the anonymized patient ID."""
+
+    @staticmethod
+    async def _upload_and_predict(client, headers, patient_id: str) -> dict:
+        upload = await client.post(
+            "/api/v1/scans/upload",
+            files={"file": ("scan.png", make_png_bytes(), "image/png")},
+            data={"anonymized_patient_id": patient_id},
+            headers=headers,
+        )
+        assert upload.status_code == 201, upload.text
+        scan = upload.json()
+        predict = await client.post(
+            f"/api/v1/predictions/predict/{scan['id']}", headers=headers
+        )
+        assert predict.status_code == 200, predict.text
+        return scan, predict.json()["prediction"]
+
+    async def test_staff_cannot_query_patient_history(self, client, db_session, test_user, auth_headers, staff_headers):
+        await self._upload_and_predict(client, auth_headers, "PT-STAFF-PROBE")
+        resp = await client.get(
+            "/api/v1/predictions/patient/PT-STAFF-PROBE/history",
+            headers=staff_headers,
+        )
+        assert resp.status_code == 403
+
+    async def test_doctor_can_query_anonymized_patient_history(self, client, db_session, test_user, auth_headers):
+        scan, pred = await self._upload_and_predict(client, auth_headers, "PT-ANON-7")
+        resp = await client.get(
+            "/api/v1/predictions/patient/PT-ANON-7/history",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        history = resp.json()
+        assert len(history) == 1
+        assert history[0]["id"] == pred["id"]
+        assert history[0]["scan"]["anonymized_patient_id"] == "PT-ANON-7"
+        # Only anonymized identity is exposed — the raw DICOM patient
+        # identifier must never be echoed.
+        assert history[0]["scan"]["anonymized_patient_id"] != "12345"
+
+    async def test_radiologist_can_query_patient_history(self, client, db_session, test_user, auth_headers):
+        radiologist = User(
+            username="hist_radiologist",
+            email="hist_rad@example.com",
+            hashed_password=get_password_hash("testpass123"),
+            role=UserRole.RADIOLOGIST,
+            is_active=True,
+        )
+        db_session.add(radiologist)
+        await db_session.commit()
+        await db_session.refresh(radiologist)
+
+        await self._upload_and_predict(client, auth_headers, "PT-RAD-1")
+        rad_headers = await _login(client, "hist_radiologist", "testpass123")
+        resp = await client.get(
+            "/api/v1/predictions/patient/PT-RAD-1/history",
+            headers=rad_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()) == 1
+
+    async def test_unknown_patient_id_returns_empty_list(self, client, db_session, test_user, auth_headers):
+        # A peer's patient ID is opaque: an empty list, never a 404 that
+        # would reveal whether that patient exists.
+        resp = await client.get(
+            "/api/v1/predictions/patient/PT-NO-SUCH-PATIENT/history",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
 
 
 class TestDicomPhiHardening:

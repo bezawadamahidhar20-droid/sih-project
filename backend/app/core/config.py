@@ -136,6 +136,64 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _require_https_cors_origins_in_production(self) -> "Settings":
+        """Production CORS/CSRF allowlist must be explicit HTTPS origins.
+
+        The compose default (``http://localhost:8080``) is a dev-origin
+        placeholder. In production the browser talks to the HTTPS frontend,
+        and this list doubles as the CSRF Origin allowlist (see main.py), so a
+        default/localhost origin either breaks the app or — worse — silently
+        blesses a misconfigured deployment. Fail fast instead: production
+        requires every origin to be non-empty and https:// (no localhost).
+        """
+        if self.environment.lower() != "production":
+            return self
+        if not self.cors_origins:
+            raise ValueError(
+                "CORS_ORIGINS is empty while ENVIRONMENT=production. Set it to "
+                "the HTTPS origin of your frontend (e.g. "
+                'CORS_ORIGINS=["https://mediscan.example.com"]).'
+            )
+        for origin in self.cors_origins:
+            if not origin.startswith("https://"):
+                raise ValueError(
+                    "CORS_ORIGINS contains a non-HTTPS origin while "
+                    f"ENVIRONMENT=production: {origin!r}. Production requires "
+                    "explicit HTTPS frontend origins — never ship the "
+                    "http://localhost default to production."
+                )
+            host = origin.removeprefix("https://").split("/", 1)[0]
+            if "localhost" in host.lower():
+                raise ValueError(
+                    f"CORS_ORIGINS contains a localhost origin ({origin!r}) "
+                    "while ENVIRONMENT=production. Configure the real HTTPS "
+                    "frontend origin."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _reject_known_default_db_password_in_production(self) -> "Settings":
+        """Refuse to boot a production backend on a well-known database
+        password (e.g. the compose template default ``mediscan``), so a
+        misconfigured deployment can never silently run with a guessable
+        credential. Only PostgreSQL URLs carry a password (SQLite does not)."""
+        if self.environment.lower() != "production":
+            return self
+        if not self.database_url.startswith("postgres"):
+            return self
+        from urllib.parse import urlparse, unquote
+
+        password = urlparse(self.database_url).password or ""
+        if unquote(password).lower() in {"mediscan", "postgres", "password", ""}:
+            raise ValueError(
+                "DATABASE_URL uses a known-default PostgreSQL password while "
+                "ENVIRONMENT=production. Generate a strong POSTGRES_PASSWORD "
+                "and rebuild the connection string — never run production "
+                "against a well-known credential."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _absolutize_relative_paths(self) -> "Settings":
         """Resolve relative file paths against the backend package root.
 

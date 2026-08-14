@@ -14,9 +14,9 @@ sleep 1
 export PORT_OVERRIDE=8000
 export ALLOW_HEURISTIC_FALLBACK_OVERRIDE=false
 export COOKIE_SECURE_OVERRIDE=true
-export DATABASE_URL_OVERRIDE="postgresql+asyncpg://mediscan:mediscan@127.0.0.1:5433/mediscan"
-export REDIS_URL_OVERRIDE="redis://127.0.0.1:6379/0"
-export CORS_ORIGINS_OVERRIDE='["https://127.0.0.1:8443","http://localhost:5173","http://localhost:3000"]'
+export DATABASE_URL_OVERRIDE="postgresql+asyncpg://mediscan:E2ePgPass2026@127.0.0.1:5433/mediscan"
+export REDIS_URL_OVERRIDE="redis://:e2eRedisPass1@127.0.0.1:6379/0"
+export CORS_ORIGINS_OVERRIDE='["https://127.0.0.1:8443"]'
 # shellcheck disable=SC1091
 source "$HERE/prod_env.sh" 1
 

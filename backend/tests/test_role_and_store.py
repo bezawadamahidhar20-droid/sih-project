@@ -126,6 +126,9 @@ class TestSlidingWindowStore:
             "encryption_key": "e" * 64,
             "encryption_salt": "s" * 32,
             "database_url": "sqlite+aiosqlite:///:memory:",
+            # Production now refuses non-HTTPS CORS origins; give the test a
+            # realistic HTTPS frontend origin.
+            "cors_origins": ["https://mediscan.example.com"],
             "environment": "production",
         }
         with pytest.raises(ValueError, match="WORKERS must be 1"):

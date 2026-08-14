@@ -13,7 +13,7 @@ import asyncpg
 async def main() -> None:
     conn = await asyncpg.connect(
         host="127.0.0.1", port=5433, user="mediscan",
-        password="mediscan", database="mediscan",
+        password="E2ePgPass2026", database="mediscan",
     )
     try:
         e2e_users = ("doctore2e", "staffe2e", "locktest", "ratetest",

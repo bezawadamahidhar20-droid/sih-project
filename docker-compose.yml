@@ -30,7 +30,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mediscan}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mediscan}
+      # Required, never defaulted: the old `:-mediscan` default silently ran
+      # production against a well-known credential. The backend ALSO refuses
+      # known-default passwords (mediscan/postgres/password/empty) when
+      # ENVIRONMENT=production, so `docker compose up` fails fast either way.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD to a strong value in .env (never the default 'mediscan')}
       POSTGRES_DB: ${POSTGRES_DB:-mediscan}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -49,6 +53,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     # No host port mapping: the API is reachable ONLY through the nginx
     # proxy on the frontend container (Internet -> HTTPS proxy -> frontend
     # -> backend). Exposing /docs or the raw API on a host port would bypass
@@ -59,7 +65,7 @@ services:
       APP_NAME: MediScan AI
       DEBUG: "false"
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mediscan}:${POSTGRES_PASSWORD:-mediscan}@db:5432/${POSTGRES_DB:-mediscan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mediscan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-mediscan}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY (>=32 chars) in .env}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (>=32 chars) in .env}
       ENCRYPTION_SALT: ${ENCRYPTION_SALT:?set ENCRYPTION_SALT (>=16 chars) in .env}
@@ -76,7 +82,11 @@ services:
       AUDIT_LOG_PATH: /app/logs/audit.log
       # Behind nginx: trust X-Forwarded-For for login-lockout / rate-limit keys.
       TRUST_PROXY_HEADERS: "true"
-      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
+      # Required in production: the CORS allowlist doubles as the CSRF
+      # Origin allowlist, and the backend refuses to boot with non-HTTPS /
+      # localhost origins while ENVIRONMENT=production. Set the real HTTPS
+      # frontend origin.
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to your HTTPS frontend origin in .env (e.g. ["https://mediscan.example.com"])}
       # A trained model is REQUIRED in production: with the file missing and
       # heuristic fallback disabled, prediction requests fail loudly (HTTP
       # 500) instead of serving guessed diagnoses. Only flip this for an
@@ -86,7 +96,9 @@ services:
       # for the single-worker demo; set USE_REDIS=true before scaling to
       # multiple workers (WORKERS>1 is refused otherwise).
       USE_REDIS: ${USE_REDIS:-false}
-      REDIS_URL: redis://redis:6379/0
+      # Password comes from the same REDIS_PASSWORD the redis service
+      # requires. Use an alphanumeric password (no URL-special chars).
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
       LOW_CONFIDENCE_THRESHOLD: ${LOW_CONFIDENCE_THRESHOLD:-0.7}
       HIGH_RISK_THRESHOLD: ${HIGH_RISK_THRESHOLD:-0.9}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
@@ -100,9 +112,23 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # No host port: Redis is only reachable inside the stack. Used for shared
-    # rate limiting / login lockout when USE_REDIS=true (needed to scale
-    # beyond one worker); with USE_REDIS=false (the default) it stays idle.
+    # Redis AUTH (requirepass) is enabled by default: the backend connects
+    # with the password embedded in REDIS_URL (redis-py parses it), and the
+    # healthcheck authenticates the same way. No host port: Redis is only
+    # reachable inside the stack. Used for shared rate limiting / login
+    # lockout when USE_REDIS=true (needed to scale beyond one worker); with
+    # USE_REDIS=false (the default) it stays idle but is still protected.
+    command: ["sh", "-c", "redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD to a strong value in .env}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks: [mediscan]
 
   frontend:
@@ -116,6 +142,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
   uploads:
   logs:
 

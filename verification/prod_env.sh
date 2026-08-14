@@ -22,7 +22,11 @@ export ENVIRONMENT=production
 export DEBUG=false
 export WORKERS="${1:-1}"
 export USE_REDIS=true
-export REDIS_URL=redis://127.0.0.1:6379/0
+# The local verification redis-server runs with `--requirepass e2eRedisPass1`
+# (see verification README / smoke_redis flow); the backend authenticates via
+# the password embedded in the URL — exactly the compose production layout.
+export REDIS_PASSWORD=e2eRedisPass1
+export REDIS_URL="redis://:${REDIS_PASSWORD}@127.0.0.1:6379/0"
 export ALLOW_HEURISTIC_FALLBACK=false
 export SEED_DEMO_USERS=false
 export SEED_DEMO_SCANS=false
@@ -36,7 +40,7 @@ export UPLOAD_DIR="./uploads_e2e"
 export AUDIT_LOG_PATH="./logs_e2e/audit.log"
 export COOKIE_SECURE=false
 export TRUST_PROXY_HEADERS=true
-export CORS_ORIGINS='["http://localhost:5173","http://localhost:3000"]'
+export CORS_ORIGINS='["https://127.0.0.1:8443"]'
 export UPLOAD_RATE_LIMIT_PER_MINUTE=5
 export PREDICT_RATE_LIMIT_PER_MINUTE=5
 export HOST=127.0.0.1

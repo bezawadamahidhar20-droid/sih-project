@@ -108,8 +108,8 @@ r = c2.post("/api/v1/auth/login", json={"username": "doctore2e", "password": "E2
             headers={"Origin": "http://evil.example"})
 check("login with cross-site Origin -> 403", r.status_code == 403, f"(got {r.status_code})")
 r = c2.post("/api/v1/auth/login", json={"username": "doctore2e", "password": "E2ePass123!"},
-            headers={"Origin": "http://localhost:5173"})
-check("login with allowlisted Origin -> 200", r.status_code == 200, f"(got {r.status_code})")
+            headers={"Origin": "https://127.0.0.1:8443"})
+check("login with allowlisted HTTPS Origin -> 200", r.status_code == 200, f"(got {r.status_code})")
 
 # ------------------------------------------------------------- C. refresh
 print("== C. refresh rotation + replay family-revoke ==")

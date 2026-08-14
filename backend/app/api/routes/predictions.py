@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -183,6 +183,26 @@ async def predict_scan(
 
     if current_user.role == UserRole.STAFF:
         query = query.where(Scan.uploaded_by == current_user.id)
+    else:
+        # Object-level authorization for doctors/radiologists: creating a
+        # prediction must never grant NEW access to a scan the caller does
+        # not already own. (Predict-then-access BOLA, live-confirmed: doctor
+        # B could predict doctor A's scan and the resulting prediction —
+        # owned by B — unlocked A's PDF report, Grad-CAM heatmap and derived
+        # images, defeating the owner-scoped resource boundary.) A doctor may
+        # only predict a scan they uploaded, or one they have already
+        # predicted (pre-guard rows; that access already existed). Denied
+        # with a plain 404 so a peer's scan existence is never disclosed.
+        query = query.where(
+            or_(
+                Scan.uploaded_by == current_user.id,
+                Scan.id.in_(
+                    select(Prediction.scan_id).where(
+                        Prediction.user_id == current_user.id
+                    )
+                ),
+            )
+        )
 
     result = await db.execute(query)
     scan = result.scalar_one_or_none()
@@ -518,6 +538,17 @@ async def get_prediction(
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
 
+    # IDOR guard: reading a prediction BY ID follows the same object-level
+    # rule as flag/PDF/heatmap — the prediction's creator or the scan's
+    # uploader only. (The doctor-wide LIST view — list_predictions / patient
+    # history — is the intentional clinical-visibility surface for the
+    # multi-doctor review workflow; this endpoint is the direct object-level
+    # access pattern and must not let a peer reach a specific record. The
+    # frontend never calls it, so this cannot regress the UI.) Denied with a
+    # plain 404 so a peer's record existence is never disclosed.
+    if not _can_access_prediction(current_user, prediction):
+        raise HTTPException(status_code=404, detail="Prediction not found")
+
     return _to_prediction_response(prediction, _gradcam_url(prediction), prediction.scan)
 
 
@@ -727,6 +758,21 @@ async def get_patient_history(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.DOCTOR, UserRole.RADIOLOGIST))
 ):
+    """Return the full anonymized prediction history for one patient.
+
+    Authorization model (INTENTIONAL, do not change without a product
+    decision): patient IDs are anonymized opaque identifiers — a hash or a
+    clinician-assigned token, never a real MRN/name — and this endpoint is
+    restricted to DOCTOR/RADIOLOGIST roles via ``require_roles``. Within
+    that clinical boundary any doctor may review any patient's history, the
+    same model ``list_predictions`` uses: doctors/radiologists are the
+    trusted clinical layer (a radiologist re-reading a GP's referral is a
+    supported workflow), while STAFF are scoped to their own uploads only
+    (see the staff branch of ``list_predictions`` / ``get_scan``). The
+    anonymization + role gate is what keeps this safe: a caller cannot
+    enumerate patients (IDs are opaque) and cannot see PHI (no raw
+    filenames/identifiers beyond the anonymized ID are exposed here).
+    """
     query = (
         select(Prediction)
         .join(Scan)

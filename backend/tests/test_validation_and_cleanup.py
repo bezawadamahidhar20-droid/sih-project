@@ -251,6 +251,72 @@ class TestProductionConfig:
             encryption_key="e" * 64,
             encryption_salt="s" * 32,
             database_url="sqlite+aiosqlite:///:memory:",
+            cors_origins=["https://mediscan.example.com"],
         )
         assert settings.environment == "production"
         assert settings.seed_demo_users is False
+
+    def test_http_localhost_cors_origin_rejected_in_production(self):
+        """Production must refuse the compose default
+        (``CORS_ORIGINS=["http://localhost:8080"]``) — the CORS allowlist
+        doubles as the CSRF Origin allowlist, so shipping a dev origin to
+        production would either break the app or bless a misconfigured
+        deployment. Fail fast instead."""
+        from app.core.config import Settings
+
+        base = dict(
+            jwt_secret_key="f" * 64,
+            encryption_key="e" * 64,
+            encryption_salt="s" * 32,
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+        for bad in (["http://localhost:8080"], ["http://localhost:5173"], []):
+            with pytest.raises(ValueError, match="CORS_ORIGINS"):
+                Settings(environment="production", _env_file=None, cors_origins=bad, **base)
+
+        # Localhost over HTTPS is still not a production origin.
+        with pytest.raises(ValueError, match="CORS_ORIGINS"):
+            Settings(
+                environment="production", _env_file=None,
+                cors_origins=["https://localhost:8443"], **base,
+            )
+
+    def test_http_localhost_cors_origin_allowed_in_development(self):
+        from app.core.config import Settings
+
+        settings = Settings(
+            environment="development",
+            _env_file=None,
+            jwt_secret_key="f" * 64,
+            encryption_key="e" * 64,
+            encryption_salt="s" * 32,
+            database_url="sqlite+aiosqlite:///:memory:",
+            cors_origins=["http://localhost:5173", "http://localhost:8080"],
+        )
+        assert settings.cors_origins == ["http://localhost:5173", "http://localhost:8080"]
+
+    def test_known_default_postgres_password_rejected_in_production(self):
+        """The compose template default (``mediscan``) must never silently
+        become a production database credential."""
+        from app.core.config import Settings
+
+        base = dict(
+            jwt_secret_key="f" * 64,
+            encryption_key="e" * 64,
+            encryption_salt="s" * 32,
+            cors_origins=["https://mediscan.example.com"],
+        )
+        for bad in (
+            "postgresql+asyncpg://mediscan:mediscan@db:5432/mediscan",
+            "postgresql+asyncpg://mediscan:@db:5432/mediscan",
+            "postgresql+asyncpg://mediscan:postgres@db:5432/mediscan",
+        ):
+            with pytest.raises(ValueError, match="known-default PostgreSQL password"):
+                Settings(environment="production", _env_file=None, database_url=bad, **base)
+
+        # A strong password boots fine; SQLite (no password concept) is exempt.
+        ok = Settings(
+            environment="production", _env_file=None,
+            database_url="postgresql+asyncpg://mediscan:V3ry-Strong-Pw@db:5432/mediscan", **base,
+        )
+        assert ok.database_url.startswith("postgresql")
